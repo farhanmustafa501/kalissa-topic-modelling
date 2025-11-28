@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Kalisa Topic Modelling</title>
+	<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+	<style>
+		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+		.container { max-width: 900px; margin: 0 auto; }
+		.card { padding: 1rem; border: 1px solid #e5e7eb; border-radius: 8px; }
+		.btn { background: #111827; color: white; padding: .6rem 1rem; border-radius: 6px; border: none; cursor: pointer; }
+		.btn:disabled { opacity: .6; cursor: not-allowed; }
+		code { background: #f3f4f6; padding: .1rem .3rem; border-radius: 4px; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>Kalisa Topic Modelling</h1>
+		<p>This is a minimal scaffold. Click the button to call the backend health API using HTMX.</p>
+
+		<div class="card" id="health-card">
+			<button class="btn"
+			        hx-get="/api/health"
+			        hx-trigger="click"
+			        hx-target="#health-result"
+			        hx-indicator="#health-loading">
+				Check Health
+			</button>
+			<span id="health-loading" class="htmx-indicator" style="margin-left: .5rem;">Loading…</span>
+			<pre id="health-result" style="margin-top: 1rem;"></pre>
+		</div>
+
+		<p style="margin-top: 2rem;">
+			API: <code>GET /api/health</code> • UI: <code>GET /</code>
+		</p>
+	</div>
+</body>
+</html>
+
+
