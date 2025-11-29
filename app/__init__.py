@@ -1,6 +1,7 @@
 from flask import Flask
 
 from .config import get_config
+from .db import Base, engine
 
 
 def create_app() -> Flask:
@@ -12,6 +13,13 @@ def create_app() -> Flask:
 
 	app.register_blueprint(api_bp, url_prefix="/api")
 	app.register_blueprint(ui_bp)
+
+	# Dev convenience: ensure tables exist if migrations not run.
+	try:
+		Base.metadata.create_all(engine)
+	except Exception:
+		# Avoid crashing app boot if DB is not ready; container orchestration will handle retries.
+		pass
 
 	return app
 

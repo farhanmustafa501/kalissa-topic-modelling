@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Collection {{ collection.id }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+	<div>
+		<h2 class="h4 mb-0">{{ collection.name }}</h2>
+		<div class="text-muted small">{{ collection.description or 'No description' }}</div>
+	</div>
+	<div class="d-flex gap-2">
+		<a href="/ui/collections/{{ collection.id }}/graph" class="btn btn-primary btn-sm">Open Graph</a>
+		<a href="/ui/collections" class="btn btn-outline-secondary btn-sm">Back</a>
+	</div>
+	</div>
+<div class="row g-3">
+	<div class="col-lg-8">
+		<div class="card">
+			<div class="card-body">
+				<h6 class="card-title">Add Documents (placeholder)</h6>
+				<form hx-post="/api/collections/{{ collection.id }}/documents" hx-target="#upload-result" hx-indicator="#upload-loading">
+					<div class="mb-2">
+						<textarea class="form-control" rows="5" name="documents_json" placeholder='[{"title":"Doc A","content":"..."}]'></textarea>
+						<div class="form-text">Paste JSON array (title, content). Files not handled in placeholder.</div>
+					</div>
+					<button class="btn btn-success btn-sm" type="submit">Upload</button>
+					<div class="spinner-border spinner-border-sm htmx-indicator ms-2" id="upload-loading" role="status"></div>
+				</form>
+				<pre id="upload-result" class="mt-3 mb-0 small bg-light p-2 rounded"></pre>
+			</div>
+		</div>
+		<div class="card mt-3">
+			<div class="card-body">
+				<h6 class="card-title">Topics (preview)</h6>
+				<div id="topics-list" class="small text-muted">Loading…</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-4">
+		<div class="card">
+			<div class="card-body">
+				<h6 class="card-title">Run Discovery</h6>
+				<button class="btn btn-primary btn-sm" hx-post="/api/collections/{{ collection.id }}/discover" hx-target="#job-status" hx-indicator="#job-loading">Run</button>
+				<div id="job-status" class="mt-2"></div>
+				<div class="spinner-border spinner-border-sm htmx-indicator ms-2" id="job-loading" role="status"></div>
+				<div 
+					hx-get="/ui/collections/{{ collection.id }}/discover/status"
+					hx-trigger="every 3s"
+					hx-target="#job-status"
+					hx-swap="outerHTML" class="mt-2">
+					<!-- status -->
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+<script>
+(async function loadTopics() {
+	try {
+		const res = await fetch('/api/collections/{{ collection.id }}/topics/graph');
+		const data = await res.json();
+		const container = document.getElementById('topics-list');
+		if (!data || !data.nodes || data.nodes.length === 0) {
+			container.innerHTML = '<span class="text-muted">No topics yet. Run discovery to generate topics.</span>';
+			return;
+		}
+		container.innerHTML = '';
+		const ul = document.createElement('ul');
+		ul.className = 'list-unstyled mb-0';
+		data.nodes.forEach(n => {
+			const li = document.createElement('li');
+			li.className = 'd-flex justify-content-between align-items-center border-bottom py-2';
+			li.innerHTML = `<span>${n.label}</span><span class="badge text-bg-light text-muted">Docs: ${n.document_count ?? '-'}</span>`;
+			ul.appendChild(li);
+		});
+		container.appendChild(ul);
+	} catch (e) {
+		document.getElementById('topics-list').innerHTML = '<span class="text-danger">Failed to load topics.</span>';
+	}
+})();
+</script>
+{% endblock %}
+
+

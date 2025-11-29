@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Collections{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+	<div>
+		<h2 class="h4 mb-0">Collections</h2>
+		<div class="text-muted small">Create a collection, add documents, and explore its topic graph.</div>
+	</div>
+	<div>
+		<button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newCollectionModal">New Collection</button>
+	</div>
+	<div class="modal fade" id="newCollectionModal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title">Create Collection</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading">
+						<div class="mb-2">
+							<label class="form-label">Name</label>
+							<input class="form-control" name="name" required />
+						</div>
+						<div class="mb-2">
+							<label class="form-label">Description</label>
+							<textarea class="form-control" name="description" rows="2"></textarea>
+						</div>
+						<div class="d-flex align-items-center gap-2">
+							<button class="btn btn-primary" type="submit">Create</button>
+							<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status"></div>
+						</div>
+						<pre id="create-result" class="mt-2 small bg-light p-2 rounded"></pre>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+{% if collections %}
+<div class="row row-cols-1 row-cols-md-3 g-3">
+	{% for c in collections %}
+	<div class="col">
+		<div class="card h-100">
+			<div class="card-body">
+				<h5 class="card-title mb-1">{{ c.name }}</h5>
+				<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
+				<a href="/ui/collections/{{ c.id }}" class="btn btn-outline-primary btn-sm">Open</a>
+				<a href="/ui/collections/{{ c.id }}/graph" class="btn btn-primary btn-sm">Graph</a>
+			</div>
+		</div>
+	</div>
+	{% endfor %}
+	</div>
+{% else %}
+<div class="alert alert-info">No collections yet. Click “New Collection” to get started.</div>
+{% endif %}
+{% endblock %}
+
+
+

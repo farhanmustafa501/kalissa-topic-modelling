@@ -1,0 +1,33 @@
+.highlight {
+	background: #fff3cd;
+	transition: background-color .6s ease;
+}
+
+.hero-gradient {
+	background: linear-gradient(135deg, #1f3b73 0%, #4f46e5 60%, #7c3aed 100%);
+}
+
+.stat-card {
+	border: 1px solid #eef2ff;
+}
+
+.graph-surface {
+	width: 100%;
+	height: 540px;
+	border: 1px solid #e5e7eb;
+	border-radius: .5rem;
+}
+
+.legend-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: #4f46e5;
+}
+
+.legend-line {
+	width: 22px;
+	height: 2px;
+	background: #a5b4fc;
+}
+
