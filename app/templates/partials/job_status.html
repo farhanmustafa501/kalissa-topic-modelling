@@ -1,5 +1,10 @@
-<div id="job-status" class="alert alert-info py-2 mb-0">
-	Status: <strong>{{ status.status }}</strong> – Step {{ status.step }}/{{ status.total }}: {{ status.label }}
+{% set cls = 'alert-info' %}
+{% if status.status == 'SUCCEEDED' %}{% set cls = 'alert-success' %}{% endif %}
+{% if status.status == 'FAILED' %}{% set cls = 'alert-danger' %}{% endif %}
+<div id="job-status" class="alert {{ cls }} py-2 mb-0">
+	Status: <strong>{{ status.status }}</strong>
+	{% if status.total %} – Step {{ status.step }}/{{ status.total }}{% endif %}
+	{% if status.label %} – {{ status.label }}{% endif %}
 </div>
 
 

@@ -5,26 +5,15 @@
 	<div class="row align-items-center">
 		<div class="col-md-8">
 			<h1 class="display-6 fw-semibold mb-2">Discover Topics Across Your Documents</h1>
-			<p class="lead mb-3">Generate topic graphs, insights, and topic-scoped Q&A with citations. This is a placeholder UI wired to mock APIs.</p>
+			<p class="lead mb-3">Generate topic graphs, insights, and topic-scoped Q&A with citations.</p>
 			<div class="d-flex gap-2">
-				<a href="/ui/collections" class="btn btn-light btn-lg">View Collections</a>
-				<a href="/ui/collections" class="btn btn-outline-light btn-lg">Create Collection</a>
+				<button class="btn btn-outline-light btn-lg" data-bs-toggle="modal" data-bs-target="#newCollectionModal">New Collection</button>
 			</div>
-		</div>
-		<div class="col-md-4 d-none d-md-block text-end">
-			<span class="badge text-bg-light text-dark px-3 py-2">Prototype</span>
 		</div>
 	</div>
 </section>
 <div class="row g-4">
 	<div class="col-lg-8">
-		<div class="card shadow-sm">
-			<div class="card-body">
-				<h5 class="card-title">Collections</h5>
-				<p class="card-text">Create a collection, add documents, and explore topic graphs.</p>
-				<a href="/ui/collections" class="btn btn-primary">View All Collections</a>
-			</div>
-		</div>
 		<div class="row row-cols-1 row-cols-md-3 g-3 mt-1">
 			<div class="col">
 				<div class="card stat-card">
@@ -53,24 +42,36 @@
 		</div>
 		{% if collections %}
 		<div class="mt-3">
-			<h6 class="mb-2">Recent Collections</h6>
+			<h6 class="mb-2">Collections</h6>
 			<div class="row row-cols-1 row-cols-md-3 g-3">
 				{% for c in collections %}
 				<div class="col">
-					<div class="card h-100">
-						<div class="card-body">
-							<h5 class="card-title mb-1">{{ c.name }}</h5>
-							<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
-							<a href="/ui/collections/{{ c.id }}" class="btn btn-outline-primary btn-sm">Open</a>
-							<a href="/ui/collections/{{ c.id }}/graph" class="btn btn-primary btn-sm">Graph</a>
-						</div>
+					<div class="card h-100 position-relative">
+						<a href="/collections/{{ c.id }}" class="stretched-link text-decoration-none text-reset">
+							<div class="card-body">
+								<div class="d-flex justify-content-between align-items-start">
+									<div>
+										<h5 class="card-title mb-1">{{ c.name }}</h5>
+										<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
+									</div>
+									<button class="btn btn-sm btn-outline-danger" 
+										hx-delete="/api/collections/{{ c.id }}" 
+										hx-confirm="Delete this collection?" 
+										hx-target="closest .col" 
+										hx-swap="outerHTML:remove"
+										onclick="event.stopPropagation(); event.preventDefault();">
+										Delete
+									</button>
+								</div>
+							</div>
+						</a>
 					</div>
 				</div>
 				{% endfor %}
 			</div>
 		</div>
 		{% else %}
-		<div class="alert alert-info mt-3">No collections yet. Create one from the Collections page.</div>
+		<div class="alert alert-info mt-3">No collections yet. Create one using the New Collection button.</div>
 		{% endif %}
 	</div>
 	<div class="col-lg-4">
@@ -80,6 +81,33 @@
 				<button class="btn btn-outline-secondary btn-sm" hx-get="/api/health" hx-target="#health-result" hx-indicator="#health-loading">Check</button>
 				<div class="spinner-border spinner-border-sm htmx-indicator ms-2" id="health-loading" role="status"></div>
 				<pre id="health-result" class="mt-3 mb-0 small bg-light p-2 rounded"></pre>
+			</div>
+		</div>
+	</div>
+</div>
+<div class="modal fade" id="newCollectionModal" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Create Collection</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading" hx-on::afterRequest="(function(e){try{var d=JSON.parse(e.detail.xhr.responseText);if(d&&d.id){var m=bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));if(m){m.hide();}window.location='/collections/'+d.id;}}catch(err){console.error(err);}})(event)">
+					<div class="mb-2">
+						<label class="form-label">Name</label>
+						<input class="form-control" name="name" required />
+					</div>
+					<div class="mb-2">
+						<label class="form-label">Description</label>
+						<textarea class="form-control" name="description" rows="2"></textarea>
+					</div>
+					<div class="d-flex align-items-center gap-2">
+						<button class="btn btn-primary" type="submit">Create</button>
+						<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status"></div>
+					</div>
+					<pre id="create-result" class="mt-2 small bg-light p-2 rounded"></pre>
+				</form>
 			</div>
 		</div>
 	</div>

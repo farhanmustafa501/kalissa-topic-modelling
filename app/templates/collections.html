@@ -17,7 +17,7 @@
 					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 				</div>
 				<div class="modal-body">
-					<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading">
+					<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading" hx-on::afterRequest="(function(e){try{var d=JSON.parse(e.detail.xhr.responseText);if(d&&d.id){var m=bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));if(m){m.hide();}window.location='/collections/'+d.id;}}catch(err){console.error(err);}})(event)">
 						<div class="mb-2">
 							<label class="form-label">Name</label>
 							<input class="form-control" name="name" required />
@@ -41,13 +41,25 @@
 <div class="row row-cols-1 row-cols-md-3 g-3">
 	{% for c in collections %}
 	<div class="col">
-		<div class="card h-100">
-			<div class="card-body">
-				<h5 class="card-title mb-1">{{ c.name }}</h5>
-				<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
-				<a href="/ui/collections/{{ c.id }}" class="btn btn-outline-primary btn-sm">Open</a>
-				<a href="/ui/collections/{{ c.id }}/graph" class="btn btn-primary btn-sm">Graph</a>
-			</div>
+		<div class="card h-100 position-relative">
+			<a href="/collections/{{ c.id }}" class="stretched-link text-decoration-none text-reset">
+				<div class="card-body">
+					<div class="d-flex justify-content-between align-items-start">
+						<div>
+							<h5 class="card-title mb-1">{{ c.name }}</h5>
+							<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
+						</div>
+						<button class="btn btn-sm btn-outline-danger" 
+							hx-delete="/api/collections/{{ c.id }}" 
+							hx-confirm="Delete this collection?" 
+							hx-target="closest .col" 
+							hx-swap="outerHTML:remove"
+							onclick="event.stopPropagation(); event.preventDefault();">
+							Delete
+						</button>
+					</div>
+				</div>
+			</a>
 		</div>
 	</div>
 	{% endfor %}

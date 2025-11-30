@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Collection {{ collection.id }}{% endblock %}
+{% block head_scripts %}
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
 	<div>
@@ -7,75 +10,175 @@
 		<div class="text-muted small">{{ collection.description or 'No description' }}</div>
 	</div>
 	<div class="d-flex gap-2">
-		<a href="/ui/collections/{{ collection.id }}/graph" class="btn btn-primary btn-sm">Open Graph</a>
-		<a href="/ui/collections" class="btn btn-outline-secondary btn-sm">Back</a>
+		<button class="btn btn-outline-danger btn-sm" 
+			onclick="if(confirm('Delete this collection?')){ fetch('/api/collections/{{ collection.id }}', { method: 'DELETE' }).then(()=>window.location='/collections'); }">Delete</button>
+		<a href="/collections" class="btn btn-outline-secondary btn-sm">Back</a>
 	</div>
 	</div>
 <div class="row g-3">
 	<div class="col-lg-8">
 		<div class="card">
 			<div class="card-body">
-				<h6 class="card-title">Add Documents (placeholder)</h6>
-				<form hx-post="/api/collections/{{ collection.id }}/documents" hx-target="#upload-result" hx-indicator="#upload-loading">
+				<h6 class="card-title">Documents & Discovery</h6>
+				<div id="selected-files" class="small text-muted mb-2" style="min-height:1.5rem;"></div>
+				<form 
+					hx-post="/api/collections/{{ collection.id }}/documents/upload_files" 
+					hx-trigger="change from:#file-input" 
+					hx-target="#action-result" 
+					hx-indicator="#action-loading" 
+					enctype="multipart/form-data" 
+					hx-on::afterRequest="reloadDocs(); reloadGraph();">
 					<div class="mb-2">
-						<textarea class="form-control" rows="5" name="documents_json" placeholder='[{"title":"Doc A","content":"..."}]'></textarea>
-						<div class="form-text">Paste JSON array (title, content). Files not handled in placeholder.</div>
+						<input id="file-input" class="form-control" type="file" name="files" multiple onchange="showSelectedFiles(event)" />
+						<div class="form-text">Select files to upload (auto-uploads): txt, md, pdf, docx. Max 10MB each, up to 20 files.</div>
 					</div>
-					<button class="btn btn-success btn-sm" type="submit">Upload</button>
-					<div class="spinner-border spinner-border-sm htmx-indicator ms-2" id="upload-loading" role="status"></div>
+					<div class="d-flex align-items-center gap-2">
+						<button class="btn btn-primary btn-sm" type="button" 
+							onclick="showJobStatus()"
+							hx-post="/api/collections/{{ collection.id }}/discover" 
+							hx-target="#action-result" 
+							hx-indicator="#action-loading" 
+							hx-on::afterRequest="reloadGraph()">Run Discovery</button>
+						<div class="spinner-border spinner-border-sm htmx-indicator" id="action-loading" role="status"></div>
+					</div>
 				</form>
-				<pre id="upload-result" class="mt-3 mb-0 small bg-light p-2 rounded"></pre>
+				<pre id="action-result" class="mt-3 mb-0 small bg-light p-2 rounded"></pre>
+				<div id="job-status-block" class="mt-3 d-none">
+					<div id="job-status" class="mb-2"></div>
+					<div 
+						hx-get="/ui/collections/{{ collection.id }}/discover/status"
+						hx-trigger="every 3s"
+						hx-target="#job-status"
+						hx-swap="outerHTML">
+						<!-- discovery status -->
+					</div>
+				</div>
 			</div>
 		</div>
 		<div class="card mt-3">
 			<div class="card-body">
-				<h6 class="card-title">Topics (preview)</h6>
-				<div id="topics-list" class="small text-muted">Loading…</div>
+				<h6 class="card-title">Topic Graph</h6>
+				<div id="graph-error" class="small text-danger mb-2"></div>
+				<div id="cy" class="graph-surface"></div>
+			</div>
+		</div>
+		<div class="card mt-3">
+			<div class="card-body">
+				<h6 class="card-title mb-2">Topic Details</h6>
+				<div id="topic-detail-pane" class="small text-muted">Click a node in the graph to view insights and relevant documents.</div>
 			</div>
 		</div>
 	</div>
 	<div class="col-lg-4">
 		<div class="card">
 			<div class="card-body">
-				<h6 class="card-title">Run Discovery</h6>
-				<button class="btn btn-primary btn-sm" hx-post="/api/collections/{{ collection.id }}/discover" hx-target="#job-status" hx-indicator="#job-loading">Run</button>
-				<div id="job-status" class="mt-2"></div>
-				<div class="spinner-border spinner-border-sm htmx-indicator ms-2" id="job-loading" role="status"></div>
-				<div 
-					hx-get="/ui/collections/{{ collection.id }}/discover/status"
-					hx-trigger="every 3s"
-					hx-target="#job-status"
-					hx-swap="outerHTML" class="mt-2">
-					<!-- status -->
+				<h6 class="card-title">Documents</h6>
+				<div class="d-flex gap-2 mb-2">
+					<button class="btn btn-outline-secondary btn-sm" type="button" onclick="reloadDocs()">Refresh</button>
 				</div>
+				<div id="docs-list" class="small">Loading…</div>
 			</div>
 		</div>
 	</div>
 </div>
 <script>
-(async function loadTopics() {
+function showSelectedFiles(e) {
+	const el = document.getElementById('selected-files');
+	const files = e.target.files || [];
+	if (!files.length) { el.textContent = ''; return; }
+	const names = Array.from(files).map(f => f.name);
+	el.textContent = `${files.length} selected: ` + names.join(', ');
+}
+function showJobStatus() {
+	const blk = document.getElementById('job-status-block');
+	if (blk) blk.classList.remove('d-none');
+}
+let cyInstance = null;
+function loadTopicDetailsByNodeId(nodeId){
+	if (!nodeId) return;
+	const topicId = String(nodeId).replace('t','');
+	if (!topicId) return;
+	htmx.ajax('GET', '/ui/topics/' + topicId, '#topic-detail-pane');
+}
+async function initGraph() {
+	const errorEl = document.getElementById('graph-error');
 	try {
 		const res = await fetch('/api/collections/{{ collection.id }}/topics/graph');
-		const data = await res.json();
-		const container = document.getElementById('topics-list');
-		if (!data || !data.nodes || data.nodes.length === 0) {
-			container.innerHTML = '<span class="text-muted">No topics yet. Run discovery to generate topics.</span>';
+		if (!res.ok) {
+			const text = await res.text();
+			errorEl.textContent = 'Graph load failed: ' + text;
 			return;
 		}
+		errorEl.textContent = '';
+		const data = await res.json();
+		const elements = [
+			...data.nodes.map(n => ({ data: { id: n.id, label: n.label, size: Math.max(20, Math.round(20 + (n.size_score || 0) * 30)) } })),
+			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight } }))
+		];
+		const renderGraph = () => {
+			if (!cyInstance) {
+				cyInstance = cytoscape({
+					container: document.getElementById('cy'),
+					elements,
+					style: [
+						{ selector: 'node', style: { 'label': 'data(label)', 'background-color': '#4f46e5', 'color': '#fff', 'text-valign': 'center', 'width': 'data(size)', 'height': 'data(size)', 'font-size': 10 } },
+						{ selector: 'edge', style: { 'width': 2, 'line-color': '#a5b4fc', 'target-arrow-color': '#a5b4fc' } },
+						{ selector: ':selected', style: { 'background-color': '#111827' } }
+					],
+					layout: { name: 'cose', fit: true, padding: 20 }
+				});
+				cyInstance.on('tap', 'node', (evt) => {
+					const id = evt.target.id();
+					loadTopicDetailsByNodeId(id);
+				});
+			} else {
+				cyInstance.elements().remove();
+				cyInstance.add(elements);
+				cyInstance.layout({ name: 'cose', fit: true, padding: 20 }).run();
+			}
+			// Auto-load first topic if available
+			const firstNode = cyInstance.nodes().first();
+			if (firstNode && firstNode.id()) {
+				loadTopicDetailsByNodeId(firstNode.id());
+			}
+		};
+		renderGraph();
+	} catch (e) {
+		document.getElementById('graph-error').textContent = 'Graph load failed.';
+	}
+}
+function reloadGraph() { initGraph(); }
+(async function init() { await reloadDocs(); await initGraph(); })();
+async function reloadDocs() {
+	try {
+		const res = await fetch('/api/collections/{{ collection.id }}/documents');
+		const container = document.getElementById('docs-list');
+		if (!res.ok) {
+			const text = await res.text();
+			container.innerHTML = '<span class="text-danger">Failed to load documents: ' + text.replace(/[<>&]/g,'') + '</span>';
+			return;
+		}
+		const data = await res.json();
 		container.innerHTML = '';
+		if (!Array.isArray(data) || data.length === 0) {
+			container.innerHTML = '<span class="text-muted">No documents yet. Select files to upload.</span>';
+			return;
+		}
 		const ul = document.createElement('ul');
 		ul.className = 'list-unstyled mb-0';
-		data.nodes.forEach(n => {
+		data.forEach(d => {
 			const li = document.createElement('li');
-			li.className = 'd-flex justify-content-between align-items-center border-bottom py-2';
-			li.innerHTML = `<span>${n.label}</span><span class="badge text-bg-light text-muted">Docs: ${n.document_count ?? '-'}</span>`;
+			li.id = 'doc-' + d.id;
+			li.className = 'border-bottom py-2';
+			const preview = d.preview ? `<div class=\"text-muted small\">${d.preview}</div>` : '';
+			li.innerHTML = `<div class=\"d-flex justify-content-between align-items-center\"><strong>${d.title}</strong></div>${preview}`;
 			ul.appendChild(li);
 		});
 		container.appendChild(ul);
 	} catch (e) {
-		document.getElementById('topics-list').innerHTML = '<span class="text-danger">Failed to load topics.</span>';
+		document.getElementById('docs-list').innerHTML = '<span class="text-danger">Failed to load documents.</span>';
 	}
-})();
+}
 </script>
 {% endblock %}
 
