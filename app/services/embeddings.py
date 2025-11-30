@@ -93,39 +93,6 @@ def _normalize_embedding(embedding: List[float]) -> List[float]:
 	return arr.tolist()
 
 
-def get_embedding_for_text(text: str) -> List[float]:
-	"""
-	Generate embedding for a single text using OpenAI's text-embedding-3-small model.
-	
-	Args:
-		text: Text to embed
-		
-	Returns:
-		Embedding vector as list of floats (1536 dimensions)
-		
-	Raises:
-		RuntimeError: If OPENAI_API_KEY is not set or API call fails
-	"""
-	if not text or not text.strip():
-		logger.warning("Attempted to embed empty text")
-		# Return zero vector for empty text
-		return [0.0] * EMBEDDING_DIM
-	
-	client = _get_openai_client()
-	model = os.getenv("OPENAI_EMBEDDING_MODEL") or "text-embedding-3-small"
-	
-	prepared = _truncate_for_openai(text)
-	
-	try:
-		logger.debug("Generating embedding for text", extra={"text_length": len(prepared)})
-		resp = client.embeddings.create(model=model, input=prepared)
-		vec = resp.data[0].embedding or []
-		return _normalize_embedding(vec)
-	except Exception as e:
-		logger.exception("Failed to generate embedding", extra={"error": str(e)})
-		raise RuntimeError(f"Failed to generate embedding: {str(e)}") from e
-
-
 def get_embeddings_batch(texts: List[str], batch_size: int = 100) -> List[List[float]]:
 	"""
 	Generate embeddings for multiple texts in batches.

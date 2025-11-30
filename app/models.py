@@ -3,37 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List
 
-from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, Text, Enum, DateTime, JSON, UniqueConstraint
+from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, Text, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
 from .db import Base
 
 
-class User(Base):
-	__tablename__ = "users"
-
-	id: Mapped[int] = mapped_column(Integer, primary_key=True)
-	email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-	name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-
-	collections: Mapped[List["Collection"]] = relationship(back_populates="owner")
-
-
 class Collection(Base):
 	__tablename__ = "collections"
 
 	id: Mapped[int] = mapped_column(Integer, primary_key=True)
-	owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 	name: Mapped[str] = mapped_column(String(255), nullable=False)
 	description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 	last_discovery_job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("discovery_jobs.id"), nullable=True)
 	is_stale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-	owner: Mapped[Optional[User]] = relationship(back_populates="collections")
 	documents: Mapped[List["Document"]] = relationship(back_populates="collection", cascade="all, delete-orphan")
 	topics: Mapped[List["Topic"]] = relationship(back_populates="collection", cascade="all, delete-orphan")
 	discovery_jobs: Mapped[List["DiscoveryJob"]] = relationship(
@@ -90,10 +76,7 @@ class Topic(Base):
 	id: Mapped[int] = mapped_column(Integer, primary_key=True)
 	collection_id: Mapped[int] = mapped_column(ForeignKey("collections.id"), nullable=False, index=True)
 	name: Mapped[str] = mapped_column(String(255), nullable=False)
-	cluster_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 	document_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-	avg_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-	color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 	size_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -123,11 +106,6 @@ class DocumentTopic(Base):
 	topic: Mapped[Topic] = relationship(back_populates="document_topics")
 
 
-class RelationshipTypeEnum(str):
-	RELATED = "RELATED"
-	SUBTOPIC = "SUBTOPIC"
-
-
 class TopicRelationship(Base):
 	__tablename__ = "topic_relationships"
 	__table_args__ = (UniqueConstraint("source_topic_id", "target_topic_id", name="uq_topic_edge"),)
@@ -138,7 +116,6 @@ class TopicRelationship(Base):
 	target_topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"), nullable=False)
 	similarity_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 	relationship_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-	common_document_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 	source_topic: Mapped[Topic] = relationship(foreign_keys=[source_topic_id], back_populates="source_relationships")
 	target_topic: Mapped[Topic] = relationship(foreign_keys=[target_topic_id], back_populates="target_relationships")

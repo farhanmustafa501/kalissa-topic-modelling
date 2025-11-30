@@ -108,3 +108,68 @@
 	background: #4f46e5;
 }
 
+/* Topic detail improvements */
+.topic-detail-container {
+	padding: 0;
+}
+
+.document-card {
+	transition: all 0.2s ease;
+	border: 1px solid #e5e7eb;
+}
+
+.document-card:hover {
+	box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+	border-color: #4f46e5;
+	transform: translateY(-2px);
+}
+
+.qa-answer-container {
+	min-height: 50px;
+	padding: 1rem;
+	background: #f9fafb;
+	border-radius: 0.5rem;
+	border: 1px solid #e5e7eb;
+	line-height: 1.6;
+}
+
+.qa-answer-container .citation {
+	color: #4f46e5;
+	text-decoration: underline;
+	cursor: pointer;
+	font-weight: 600;
+	padding: 2px 4px;
+	border-radius: 3px;
+	transition: all 0.2s ease;
+}
+
+.qa-answer-container .citation:hover {
+	color: #6366f1;
+	background-color: #eef2ff;
+}
+
+/* Graph improvements */
+.graph-surface {
+	background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+	border: 2px solid #e2e8f0;
+}
+
+/* Better graph node text rendering */
+#cy {
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+#cy .cy-node-label {
+	font-weight: 600;
+	text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+}
+
+/* Card shadows */
+.card {
+	transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+	box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+}
+

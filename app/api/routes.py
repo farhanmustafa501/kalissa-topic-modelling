@@ -536,17 +536,22 @@ def ui_topic(topic_id: int):
 
 @ui_bp.get("/ui/collections/<int:collection_id>/discover/status")
 def ui_discover_status(collection_id: int):
-	# Render friendly HTML for HTMX polling
+	"""
+	Render friendly HTML for HTMX polling.
+	Stops polling automatically when job is SUCCEEDED or FAILED.
+	"""
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
 		row = session.scalars(select(DiscoveryJob).where(DiscoveryJob.collection_id == collection_id).order_by(DiscoveryJob.id.desc())).first()
 		if not row:
 			status = {"status": "IDLE", "step": 0, "total": 0, "label": "No job"}
+			job_id = None
 		else:
 			label = row.error_message or ("In progress" if row.status == JobStatusEnum.RUNNING else ("Done" if row.status == JobStatusEnum.SUCCEEDED else (row.error_message or "Pending")))
 			status = {"status": row.status, "step": row.progress_step or 0, "total": row.progress_total_steps or 0, "label": label}
-		return render_template("partials/job_status.html", collection_id=collection_id, status=status)
+			job_id = row.id
+		return render_template("partials/job_status.html", collection_id=collection_id, status=status, job_id=job_id)
 	finally:
 		session.close()
 

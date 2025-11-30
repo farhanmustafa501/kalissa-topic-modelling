@@ -16,7 +16,7 @@
 	'Finalizing',
 	'Complete'
 ] %}
-<div id="job-status" class="alert {{ cls }} py-2 mb-0" data-job-state="{{ status.status }}">
+<div id="job-status" class="alert {{ cls }} py-2 mb-0" data-job-state="{{ status.status }}" data-job-id="{{ job_id if job_id else '' }}">
 	<div class="d-flex align-items-center justify-content-between">
 		<div>
 			<strong>{{ status.status }}</strong>

@@ -1,31 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Collection {{ collection.id }}{% endblock %}
 {% block head_scripts %}
-<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<!-- Using vis-network for better overlap handling, automatic text fitting, and physics-based layout -->
+<script type="text/javascript" src="https://unpkg.com/vis-network@latest/standalone/umd/vis-network.min.js"></script>
+<link rel="stylesheet" type="text/css" href="https://unpkg.com/vis-network@latest/styles/vis-network.min.css" />
 {% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-4">
 	<div>
-		<h2 class="h4 mb-0">{{ collection.name }}</h2>
+		<h2 class="h4 mb-1">{{ collection.name }}</h2>
 		<div class="text-muted small">{{ collection.description or 'No description' }}</div>
 	</div>
-		<a href="/collections" class="btn btn-outline-secondary btn-sm">Back</a>
-	</div>
-<div class="row g-3">
+	<a href="/collections" class="btn btn-outline-secondary btn-sm">← Back to Collections</a>
+</div>
+
+<div class="row g-4">
+	<!-- Left Column: Discovery & Graph -->
 	<div class="col-lg-8">
-		<div class="card">
+		<!-- File Upload & Discovery Card -->
+		<div class="card shadow-sm mb-4">
 			<div class="card-body">
-				<h6 class="card-title">Documents & Discovery</h6>
+				<h5 class="card-title mb-3">📄 Documents & Discovery</h5>
 				<div class="mb-3">
 					<input id="file-input" class="form-control" type="file" name="files" multiple onchange="handleFileSelection(event)" />
 					<div class="form-text">Select files to upload: txt, md, pdf, docx. Max 10MB each, up to 20 files.</div>
 				</div>
 				<div id="selected-files-list" class="mb-3"></div>
 				<div class="d-flex align-items-center gap-2">
-					<button class="btn btn-primary btn-sm" type="button" 
-						id="run-discovery-btn"
-						onclick="startDiscoveryProcess(event)">
-						Run Discovery
+					<button class="btn btn-primary" type="button" id="run-discovery-btn" onclick="startDiscoveryProcess(event)">
+						🚀 Run Discovery
 					</button>
 					<div class="spinner-border spinner-border-sm d-none" id="action-loading" role="status"></div>
 				</div>
@@ -33,44 +36,65 @@
 				<div id="job-status-block" class="mt-3 d-none">
 					<div id="job-status" class="mb-2"></div>
 					<div 
-						hx-get="/ui/collections/{{ collection.id }}/discover/status"
-						hx-trigger="every 2s"
-						hx-target="#job-status"
+						id="job-status-poller"
+						hx-get="/ui/collections/{{ collection.id }}/discover/status" 
+						hx-trigger="every 2s" 
+						hx-target="#job-status" 
 						hx-swap="outerHTML">
-						<!-- discovery status -->
 					</div>
 				</div>
 			</div>
 		</div>
-		<div class="card mt-3">
+
+		<!-- Topic Graph Card -->
+		<div class="card shadow-sm mb-4">
 			<div class="card-body">
-				<h6 class="card-title">Topic Graph</h6>
+				<h5 class="card-title mb-3">🔗 Topic Graph</h5>
 				<div id="graph-error" class="small text-danger mb-2"></div>
 				<div id="cy" class="graph-surface"></div>
+				<div class="mt-2 d-flex gap-2 align-items-center">
+					<button class="btn btn-sm btn-outline-secondary" onclick="reloadGraph()">🔄 Refresh Graph</button>
+					<small class="text-muted">Click nodes to view details • Hover edges to see relationships</small>
+				</div>
 			</div>
 		</div>
-		<div class="card mt-3">
+
+		<!-- Topic Details Card -->
+		<div class="card shadow-sm">
 			<div class="card-body">
-				<h6 class="card-title mb-2">Topic Details</h6>
-				<div id="topic-detail-pane" class="small text-muted">Click a node in the graph to view insights and relevant documents.</div>
+				<h5 class="card-title mb-3">📊 Topic Details</h5>
+				<div id="topic-detail-pane">
+					<div class="text-center text-muted py-4">
+						<p>👆 Click a node in the graph above to view topic insights, documents, and Q&A</p>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
+
+	<!-- Right Column: Documents List -->
 	<div class="col-lg-4">
-		<div class="card" style="position: sticky; top: 84px;">
+		<div class="card shadow-sm" style="position: sticky; top: 20px;">
 			<div class="card-body">
-				<h6 class="card-title">Documents</h6>
-				<div class="d-flex gap-2 mb-2">
-					<button class="btn btn-outline-secondary btn-sm" type="button" onclick="reloadDocs()">Refresh</button>
+				<div class="d-flex justify-content-between align-items-center mb-3">
+					<h5 class="card-title mb-0">📚 Documents</h5>
+					<button class="btn btn-sm btn-outline-secondary" type="button" onclick="reloadDocs()">🔄</button>
 				</div>
 				<div id="docs-list" class="small">Loading…</div>
 			</div>
 		</div>
 	</div>
 </div>
+
 <script>
 // Store selected files
 let selectedFiles = [];
+let networkInstance = null;
+let allDocsCache = [];
+let docsPage = 1;
+const docsPageSize = 10;
+let docsSnapshotKey = '';
+let lastDiscoverySnapshotKey = '';
 
 function handleFileSelection(e) {
 	const files = Array.from(e.target.files || []);
@@ -86,7 +110,7 @@ function renderSelectedFiles() {
 	}
 	
 	let html = '<div class="small mb-2"><strong>Selected Files (' + selectedFiles.length + '):</strong></div>';
-	html += '<div class="list-group list-group-flush">';
+	html += '<div class="list-group list-group-flush border rounded">';
 	selectedFiles.forEach((file, index) => {
 		let size;
 		if (file.size < 1024) {
@@ -97,13 +121,13 @@ function renderSelectedFiles() {
 			size = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
 		}
 		html += `
-			<div class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-start-0 border-end-0">
+			<div class="list-group-item d-flex justify-content-between align-items-center px-3 py-2">
 				<div class="flex-grow-1">
-					<div class="fw-medium">${file.name}</div>
+					<div class="fw-medium small">${file.name}</div>
 					<small class="text-muted">${size}</small>
 				</div>
 				<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeFile(${index})">
-					Remove
+					✕
 				</button>
 			</div>
 		`;
@@ -115,7 +139,6 @@ function renderSelectedFiles() {
 function removeFile(index) {
 	selectedFiles.splice(index, 1);
 	renderSelectedFiles();
-	// Update the file input
 	const fileInput = document.getElementById('file-input');
 	const dt = new DataTransfer();
 	selectedFiles.forEach(file => dt.items.add(file));
@@ -130,20 +153,16 @@ async function startDiscoveryProcess(ev) {
 	const loadingEl = document.getElementById('action-loading');
 	const btn = document.getElementById('run-discovery-btn');
 	
-	// Disable button and show loading
 	btn.disabled = true;
 	loadingEl.classList.remove('d-none');
 	resultEl.innerHTML = '';
 	
 	try {
-		// Step 1: Upload files if any are selected
 		if (selectedFiles && selectedFiles.length > 0) {
 			resultEl.innerHTML = '<div class="alert alert-info mb-2"><strong>Step 1:</strong> Uploading ' + selectedFiles.length + ' file(s)...</div>';
 			
 			const formData = new FormData();
-			selectedFiles.forEach(file => {
-				formData.append('files', file);
-			});
+			selectedFiles.forEach(file => formData.append('files', file));
 			
 			const uploadRes = await fetch(`/api/collections/{{ collection.id }}/documents/upload_files`, {
 				method: 'POST',
@@ -178,28 +197,20 @@ async function startDiscoveryProcess(ev) {
 			
 			resultEl.innerHTML = `<div class="alert alert-success mb-2">${successMsg}</div>`;
 			
-			// Clear selected files after successful upload
 			selectedFiles = [];
 			renderSelectedFiles();
-			const fileInput = document.getElementById('file-input');
-			fileInput.value = '';
-			
-			// Reload documents list
+			document.getElementById('file-input').value = '';
 			await reloadDocs();
 		} else {
-			// No files selected, check if there are existing documents
 			const existingDocs = await fetch(`/api/collections/{{ collection.id }}/documents`).then(r => r.json()).catch(() => []);
 			if (!existingDocs || existingDocs.length === 0) {
 				throw new Error('No files selected and no existing documents. Please select files to upload first.');
 			}
 		}
 		
-		// Step 2: Start discovery
 		resultEl.innerHTML += '<div class="alert alert-info mb-2"><strong>Step 2:</strong> Starting topic discovery...</div>';
 		
-		const discoverRes = await fetch(`/api/collections/{{ collection.id }}/discover`, {
-			method: 'POST'
-		});
+		const discoverRes = await fetch(`/api/collections/{{ collection.id }}/discover`, { method: 'POST' });
 		
 		if (!discoverRes.ok) {
 			const errorText = await discoverRes.text();
@@ -207,49 +218,39 @@ async function startDiscoveryProcess(ev) {
 		}
 		
 		const discoverData = await discoverRes.json();
-		resultEl.innerHTML += `
-			<div class="alert alert-success mb-2">
-				<strong>Step 2 Complete:</strong> Discovery job started (ID: ${discoverData.job_id})
-			</div>
-		`;
+		resultEl.innerHTML += `<div class="alert alert-success mb-2"><strong>Step 2 Complete:</strong> Discovery job started (ID: ${discoverData.job_id})</div>`;
 		
-		// Show job status polling
 		showJobStatus();
-		
-		// Update snapshot key
 		lastDiscoverySnapshotKey = docsSnapshotKey;
 		
-		// Reload graph after a delay
-		setTimeout(() => reloadGraph(), 2000);
-		
 	} catch (error) {
-		resultEl.innerHTML = `
-			<div class="alert alert-danger mb-2">
-				<strong>Error:</strong> ${error.message}
-			</div>
-		`;
+		resultEl.innerHTML = `<div class="alert alert-danger mb-2"><strong>Error:</strong> ${error.message}</div>`;
 		console.error('Discovery process error:', error);
 	} finally {
 		btn.disabled = false;
 		loadingEl.classList.add('d-none');
 	}
 }
+
 function showJobStatus() {
 	const blk = document.getElementById('job-status-block');
-	if (blk) blk.classList.remove('d-none');
-	// ensure polling is active
-	const pollWrapper = blk ? blk.querySelector('[hx-get]') : null;
+	if (blk) {
+		blk.classList.remove('d-none');
+		hasRefreshedOnComplete = false; // Reset refresh flag for new job
+	}
+	const pollWrapper = document.getElementById('job-status-poller');
 	if (pollWrapper) {
-		pollWrapper.setAttribute('hx-trigger', 'every 3s');
+		pollWrapper.setAttribute('hx-trigger', 'every 2s');
 	}
 }
-let cyInstance = null;
-function loadTopicDetailsByNodeId(nodeId){
+
+function loadTopicDetailsByNodeId(nodeId) {
 	if (!nodeId) return;
-	const topicId = String(nodeId).replace('t','');
+	const topicId = String(nodeId).replace('t', '');
 	if (!topicId) return;
 	htmx.ajax('GET', '/ui/topics/' + topicId, '#topic-detail-pane');
 }
+
 async function initGraph() {
 	const errorEl = document.getElementById('graph-error');
 	try {
@@ -261,93 +262,262 @@ async function initGraph() {
 		}
 		errorEl.textContent = '';
 		const data = await res.json();
-		const elements = [
-			...data.nodes.map(n => ({ data: { id: n.id, label: n.label, size: Math.max(20, Math.round(20 + (n.size_score || 0) * 30)) } })),
-			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight, type: e.type || 'RELATED' } }))
+		
+		if (!data.nodes || data.nodes.length === 0) {
+			errorEl.textContent = 'No topics found. Run discovery to generate topics.';
+			return;
+		}
+		
+		// Color palette for nodes (light, pastel colors) - using index-based mapping
+		
+		// Color palette for nodes (light, pastel colors)
+		const nodeBgColors = [
+			'#e0e7ff', '#ddd6fe', '#fce7f3', '#fef3c7', '#d1fae5',
+			'#dbeafe', '#e0f2fe', '#f0fdf4', '#fefce8', '#fef2f2',
+			'#f3e8ff', '#fdf4ff', '#ecfdf5', '#f0f9ff', '#f5f3ff'
 		];
-		const renderGraph = () => {
-			if (!cyInstance) {
-				cyInstance = cytoscape({
-					container: document.getElementById('cy'),
-					elements,
-					style: [
-						{ selector: 'node', style: { 
-							'label': 'data(label)', 
-							'background-color': 'mapData(size, 20, 50, #60a5fa, #4f46e5)', 
-							'color': '#fff', 
-							'text-valign': 'center', 
-							'text-halign': 'center', 
-							'text-wrap': 'wrap', 
-							'text-max-width': '80px', 
-							'text-overflow': 'ellipsis', 
-							'width': 'data(size)', 
-							'height': 'data(size)', 
-							'font-size': 'mapData(size, 20, 50, 8, 12)', 
-							'text-background-opacity': 0.0 
-						} },
-						{ selector: 'node:hover', style: { 'border-width': 2, 'border-color': '#111827' } },
-						{ selector: 'edge', style: { 
-							'width': 'mapData(weight, 0, 1, 1, 4)', 
-							'line-color': '#a5b4fc', 
-							'opacity': 'mapData(weight, 0, 1, 0.25, 0.8)',
-							'target-arrow-color': '#a5b4fc', 
-							'curve-style': 'bezier', 
-							'target-arrow-shape': 'triangle', 
-							'label': 'data(type)', 
-							'font-size': 8, 
-							'text-rotation': 'autorotate', 
-							'text-margin-y': -4, 
-							'color': '#6b7280' 
-						} },
-						{ selector: 'edge:hover', style: { 'line-color': '#6366f1', 'width': 4 } },
-						{ selector: '.faded', style: { 'opacity': 0.15 } },
-						{ selector: ':selected', style: { 'background-color': '#111827' } }
-					],
-					layout: { name: 'cose', fit: true, padding: 20 }
-				});
-				cyInstance.on('tap', 'node', (evt) => {
-					const id = evt.target.id();
-					loadTopicDetailsByNodeId(id);
-					// focus neighborhood
-					const nb = evt.target.closedNeighborhood();
-					cyInstance.elements().removeClass('faded');
-					cyInstance.elements().difference(nb).addClass('faded');
-				});
-				cyInstance.on('tap', (evt) => {
-					if (evt.target === cyInstance) {
-						cyInstance.elements().removeClass('faded');
+		
+		const nodeTextColors = [
+			'#4338ca', '#6d28d9', '#be185d', '#b45309', '#065f46',
+			'#1e40af', '#0369a1', '#166534', '#854d0e', '#991b1b',
+			'#7c3aed', '#a21caf', '#047857', '#0c4a6e', '#6b21a8'
+		];
+		
+		const nodeBorderColors = [
+			'#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981',
+			'#3b82f6', '#06b6d4', '#22c55e', '#eab308', '#ef4444',
+			'#a855f7', '#d946ef', '#14b8a6', '#0ea5e9', '#9333ea'
+		];
+		
+		// Calculate node sizes based on document count for better visual hierarchy
+		const maxDocs = Math.max(...data.nodes.map(n => n.document_count || 0), 1);
+		
+		// Prepare nodes for vis-network
+		const nodes = data.nodes.map((n, idx) => {
+			const docRatio = (n.document_count || 0) / maxDocs;
+			const baseSize = 30;
+			const sizeVariation = 20;
+			const nodeSize = Math.max(25, Math.min(50, baseSize + (docRatio * sizeVariation)));
+			const colorIdx = idx % nodeBgColors.length;
+			
+			return {
+				id: n.id,
+				label: n.label,
+				size: nodeSize,
+				color: {
+					background: nodeBgColors[colorIdx],
+					border: nodeBorderColors[colorIdx],
+					highlight: {
+						background: nodeBgColors[colorIdx],
+						border: '#111827'
 					}
-				});
-			} else {
-				cyInstance.elements().remove();
-				cyInstance.add(elements);
-				cyInstance.layout({ name: 'cose', fit: true, padding: 20 }).run();
+				},
+				font: {
+					color: nodeTextColors[colorIdx],
+					size: Math.max(12, Math.min(16, Math.round(nodeSize * 0.5))),
+					face: 'system-ui, -apple-system, sans-serif',
+					weight: '600'
+				},
+				borderWidth: 3,
+				borderWidthSelected: 5,
+				shape: 'box',
+				margin: 10,
+				chosen: {
+					node: function(values, id, selected, hovering) {
+						if (hovering) {
+							values.borderWidth = 5;
+							values.borderColor = '#111827';
+						}
+					}
+				}
+			};
+		});
+		
+		// Prepare edges for vis-network
+		const edges = data.edges.map(e => ({
+			id: e.source + '_' + e.target,
+			from: e.source,
+			to: e.target,
+			value: e.weight || 0,
+			width: Math.max(2, Math.min(5, (e.weight || 0) * 5)),
+			color: {
+				color: '#cbd5e1',
+				highlight: '#64748b',
+				opacity: Math.max(0.5, Math.min(0.85, (e.weight || 0) * 0.85))
+			},
+			smooth: {
+				type: 'continuous',
+				roundness: 0.5
+			},
+			arrows: {
+				to: {
+					enabled: true,
+					scaleFactor: 1.2
+				}
 			}
-			// Auto-load first topic if available
-			const firstNode = cyInstance.nodes().first();
-			if (firstNode && firstNode.id()) {
-				loadTopicDetailsByNodeId(firstNode.id());
+		}));
+		
+		const renderGraph = () => {
+			const container = document.getElementById('cy');
+			
+			// Destroy existing instance if any
+			if (networkInstance) {
+				networkInstance.destroy();
+				networkInstance = null;
 			}
+			
+			// Create network data using DataSet for better performance
+			const nodesDataSet = new vis.DataSet(nodes);
+			const edgesDataSet = new vis.DataSet(edges);
+			
+			const networkData = {
+				nodes: nodesDataSet,
+				edges: edgesDataSet
+			};
+			
+			// Configure options
+			const options = {
+				nodes: {
+					scaling: {
+						min: 20,
+						max: 60
+					},
+					chosen: true,
+					font: {
+						multi: 'html',
+						size: 14
+					}
+				},
+				edges: {
+					smooth: {
+						type: 'continuous',
+						roundness: 0.5
+					},
+					scaling: {
+						min: 1,
+						max: 5
+					}
+				},
+				physics: {
+					enabled: true,
+					solver: 'forceAtlas2Based',
+					forceAtlas2Based: {
+						gravitationalConstant: -50,
+						centralGravity: 0.01,
+						springLength: 200,
+						springConstant: 0.08,
+						damping: 0.4,
+						avoidOverlap: 1
+					},
+					stabilization: {
+						enabled: true,
+						iterations: 200,
+						updateInterval: 25,
+						onlyDynamicEdges: false,
+						fit: true
+					}
+				},
+				interaction: {
+					hover: true,
+					tooltipDelay: 100,
+					zoomView: true,
+					dragView: true
+				},
+				layout: {
+					improvedLayout: true,
+					hierarchical: {
+						enabled: false
+					}
+				}
+			};
+			
+			// Create network
+			networkInstance = new vis.Network(container, networkData, options);
+			
+			// Store original nodes and edges for reset
+			const originalNodes = new vis.DataSet(nodes);
+			const originalEdges = new vis.DataSet(edges);
+			
+			// Event handlers
+			networkInstance.on('click', function(params) {
+				if (params.nodes.length > 0) {
+					const nodeId = params.nodes[0];
+					loadTopicDetailsByNodeId(nodeId);
+					
+					// Highlight selected node and its neighbors
+					const connectedNodes = networkInstance.getConnectedNodes(nodeId);
+					const allNodeIds = nodes.map(n => n.id);
+					const fadedNodeIds = allNodeIds.filter(id => id !== nodeId && !connectedNodes.includes(id));
+					
+					// Update nodes with opacity
+					originalNodes.forEach(node => {
+						const isFaded = fadedNodeIds.includes(node.id);
+						originalNodes.update({
+							id: node.id,
+							opacity: isFaded ? 0.2 : 1
+						});
+					});
+					
+					// Update edges with opacity
+					originalEdges.forEach(edge => {
+						const isFaded = fadedNodeIds.includes(edge.from) || fadedNodeIds.includes(edge.to);
+						originalEdges.update({
+							id: edge.id,
+							opacity: isFaded ? 0.1 : 0.6
+						});
+					});
+				} else {
+					// Reset all nodes when clicking on background
+					originalNodes.forEach(node => {
+						originalNodes.update({ id: node.id, opacity: 1 });
+					});
+					originalEdges.forEach(edge => {
+						originalEdges.update({ id: edge.id, opacity: 0.6 });
+					});
+				}
+			});
+			
+			// Make networkInstance globally accessible
+			window.networkInstance = networkInstance;
+			
+			// Load first topic after stabilization
+			networkInstance.once('stabilizationEnd', function() {
+				if (nodes.length > 0) {
+					loadTopicDetailsByNodeId(nodes[0].id);
+				}
+			});
 		};
+		
 		renderGraph();
 	} catch (e) {
-		document.getElementById('graph-error').textContent = 'Graph load failed.';
+		errorEl.textContent = 'Graph load failed: ' + e.message;
+		console.error('Graph error:', e);
 	}
 }
-function reloadGraph() { initGraph(); }
-(async function init() { await reloadDocs(); await initGraph(); })();
 
-// Docs UI state
-let allDocsCache = [];
-let docsPage = 1;
-const docsPageSize = 10;
-let docsSnapshotKey = '';
-let lastDiscoverySnapshotKey = '';
+let isReloadingGraph = false;
+
+function reloadGraph() {
+	if (isReloadingGraph) return; // Prevent concurrent reloads
+	isReloadingGraph = true;
+	
+	if (networkInstance) {
+		networkInstance.destroy();
+		networkInstance = null;
+	}
+	
+	setTimeout(() => {
+		initGraph();
+		isReloadingGraph = false;
+	}, 100);
+}
 
 function computeSnapshotKey(docs) {
 	try {
 		return (docs || []).map(d => d.id).join(',');
-	} catch { return ''; }
+	} catch {
+		return '';
+	}
 }
 
 function renderDocsPage() {
@@ -363,31 +533,34 @@ function renderDocsPage() {
 	if (docsPage < 1) docsPage = 1;
 	const start = (docsPage - 1) * docsPageSize;
 	const end = Math.min(start + docsPageSize, total);
+	
 	const ul = document.createElement('ul');
 	ul.className = 'list-unstyled mb-0';
 	allDocsCache.slice(start, end).forEach(d => {
 		const li = document.createElement('li');
 		li.id = 'doc-' + d.id;
 		li.className = 'border-bottom py-2';
-		const previewHtml = d.preview ? `<div class="doc-preview truncate-2">${d.preview}</div>` : '';
-		li.innerHTML = `<div class="doc-list-item"><div class="doc-title truncate-1">${d.title}</div>${previewHtml}</div>`;
+		const previewHtml = d.preview ? `<div class="doc-preview truncate-2 text-muted small mt-1">${d.preview}</div>` : '';
+		li.innerHTML = `<div class="doc-list-item"><div class="doc-title truncate-1 fw-medium">${d.title}</div>${previewHtml}</div>`;
+		li.onclick = () => scrollToDoc(d.id);
+		li.style.cursor = 'pointer';
 		ul.appendChild(li);
 	});
 	container.appendChild(ul);
-	// pager
+	
 	const pager = document.createElement('div');
 	pager.className = 'pager';
 	const prevBtn = document.createElement('button');
 	prevBtn.className = 'btn btn-outline-secondary btn-sm';
-	prevBtn.textContent = 'Previous';
+	prevBtn.textContent = '← Previous';
 	prevBtn.disabled = docsPage <= 1;
 	prevBtn.onclick = () => { docsPage -= 1; renderDocsPage(); };
 	const info = document.createElement('div');
 	info.className = 'pager-info';
-	info.textContent = `Showing ${start + 1}-${end} of ${total}`;
+	info.textContent = `${start + 1}-${end} of ${total}`;
 	const nextBtn = document.createElement('button');
 	nextBtn.className = 'btn btn-outline-secondary btn-sm';
-	nextBtn.textContent = 'Next';
+	nextBtn.textContent = 'Next →';
 	nextBtn.disabled = docsPage >= totalPages;
 	nextBtn.onclick = () => { docsPage += 1; renderDocsPage(); };
 	pager.appendChild(prevBtn);
@@ -396,20 +569,30 @@ function renderDocsPage() {
 	container.appendChild(pager);
 }
 
+function scrollToDoc(docId) {
+	const docEl = document.getElementById('doc-' + docId);
+	if (docEl) {
+		docEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		docEl.style.backgroundColor = '#fff3cd';
+		setTimeout(() => {
+			docEl.style.backgroundColor = '';
+		}, 2000);
+	}
+}
+
 async function reloadDocs() {
 	try {
 		const res = await fetch('/api/collections/{{ collection.id }}/documents');
 		const container = document.getElementById('docs-list');
 		if (!res.ok) {
 			const text = await res.text();
-			container.innerHTML = '<span class="text-danger">Failed to load documents: ' + text.replace(/[<>&]/g,'') + '</span>';
+			container.innerHTML = '<span class="text-danger">Failed to load documents: ' + text.replace(/[<>&]/g, '') + '</span>';
 			return;
 		}
 		const data = await res.json();
 		allDocsCache = Array.isArray(data) ? data : [];
 		docsSnapshotKey = computeSnapshotKey(allDocsCache);
 		if (!lastDiscoverySnapshotKey) {
-			// Initialize baseline on first load
 			lastDiscoverySnapshotKey = docsSnapshotKey;
 		}
 		docsPage = 1;
@@ -419,48 +602,72 @@ async function reloadDocs() {
 	}
 }
 
-function renderActionMessage(msg, type = 'warning') {
-	const out = document.getElementById('action-result');
-	out.textContent = '';
-	out.classList.remove('bg-light');
-	out.classList.add('alert', `alert-${type}`);
-	out.textContent = msg;
-	// auto-clear after a while for warnings
-	if (type !== 'danger') {
-		setTimeout(() => {
-			out.classList.remove('alert', `alert-${type}`);
-			out.classList.add('bg-light');
-			out.textContent = '';
-		}, 2500);
-	}
-}
+// Track if we've already refreshed to prevent multiple refreshes
+let hasRefreshedOnComplete = false;
+let currentJobId = null;
+let refreshTimeout = null;
 
-// Legacy function - kept for compatibility but not used
-function runDiscoveryIfNeeded(ev) {
-	return true;
-}
-
-function afterDiscoveryRequested(e) {
-	// Handled in startDiscoveryProcess now
-}
-
-// Hide/stop job status when completed; reset fresh for each new job
+// Auto-refresh when job completes (only once)
 document.body.addEventListener('htmx:afterSwap', function (evt) {
 	const tgt = evt.target;
-	if (!tgt) return;
-	if (tgt.id === 'job-status') {
-		const state = tgt.getAttribute('data-job-state') || '';
-		if (state === 'SUCCEEDED' || state === 'FAILED') {
-			// Hide the block and stop polling by removing the polling element
-			const blk = document.getElementById('job-status-block');
-			if (blk) blk.classList.add('d-none');
-			// Stop polling by disabling the trigger (keep element for next runs)
-			const pollWrapper = blk ? blk.querySelector('[hx-get]') : null;
-			if (pollWrapper) {
-				pollWrapper.setAttribute('hx-trigger', 'none');
-			}
+	if (!tgt || tgt.id !== 'job-status') return;
+	
+	const state = tgt.getAttribute('data-job-state') || '';
+	const jobId = tgt.getAttribute('data-job-id') || '';
+	
+	// Only process if this is a new job or state changed
+	if (jobId && jobId !== currentJobId) {
+		currentJobId = jobId;
+		hasRefreshedOnComplete = false;
+		// Clear any pending refresh
+		if (refreshTimeout) {
+			clearTimeout(refreshTimeout);
+			refreshTimeout = null;
+		}
+	}
+	
+	// Stop polling when job completes
+	if (state === 'SUCCEEDED' || state === 'FAILED') {
+		const pollWrapper = document.getElementById('job-status-poller');
+		if (pollWrapper) {
+			pollWrapper.setAttribute('hx-trigger', 'none');
+		}
+	}
+	
+	// Only refresh once when job succeeds
+	if (state === 'SUCCEEDED' && !hasRefreshedOnComplete && jobId) {
+		hasRefreshedOnComplete = true;
+		
+		// Auto-refresh graph and docs only once, after a short delay
+		refreshTimeout = setTimeout(() => {
+			reloadGraph();
+			reloadDocs();
+			refreshTimeout = null;
+		}, 2000);
+		
+		// Hide status block after showing success
+		const blk = document.getElementById('job-status-block');
+		if (blk) {
+			setTimeout(() => {
+				blk.classList.add('d-none');
+			}, 5000);
+		}
+	} else if (state === 'FAILED') {
+		// Hide after longer delay for errors
+		const blk = document.getElementById('job-status-block');
+		if (blk) {
+			setTimeout(() => {
+				blk.classList.add('d-none');
+			}, 10000);
 		}
 	}
 });
+
+// Initialize
+(async function init() {
+	await reloadDocs();
+	await initGraph();
+})();
 </script>
 {% endblock %}
+
