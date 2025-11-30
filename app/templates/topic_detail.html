@@ -12,19 +12,58 @@
 		{% endfor %}
 	</div>
 	{% endif %}
-	<h6 class="mb-2">Documents</h6>
-	<div id="doc-list" class="d-flex flex-column gap-2">
-		{% for row in ranked_docs %}
-		{% set d = row.Document %}
-		{% set dt = row.DocumentTopic %}
-		<div class="p-2 border rounded">
-			<div class="d-flex justify-content-between align-items-center">
-				<strong>{{ d.title }}</strong>
-				{% if dt.is_primary %}<span class="badge text-bg-success">Primary</span>{% else %}<span class="badge text-bg-info">Secondary</span>{% endif %}
+	<div class="row g-3">
+		<div class="col-md-7">
+			<h6 class="mb-2">Documents</h6>
+			<div id="doc-list" class="d-flex flex-column gap-2">
+				{% for row in ranked_docs %}
+				{% set d = row.Document %}
+				{% set dt = row.DocumentTopic %}
+				<div class="p-2 border rounded">
+					<div class="d-flex justify-content-between align-items-center">
+						<strong class="truncate-1" title="{{ d.title }}">{{ d.title }}</strong>
+						{% if dt.is_primary %}<span class="badge text-bg-success">Primary</span>{% else %}<span class="badge text-bg-info">Secondary</span>{% endif %}
+					</div>
+					<div class="text-muted small truncate-2">{{ d.preview or '—' }}</div>
+				</div>
+				{% endfor %}
 			</div>
-			<div class="text-muted small">{{ d.preview or '—' }}</div>
 		</div>
-		{% endfor %}
+		<div class="col-md-5">
+			{% if insight and (insight.common_questions or insight.related_concepts) %}
+			<h6 class="mb-2">Deeper Insights</h6>
+			{% if insight.common_questions %}
+			<div class="mb-2">
+				<div class="text-muted small mb-1">Common Questions</div>
+				<ul class="small mb-2 ps-3">
+					{% for q in insight.common_questions %}
+					<li>{{ q }}</li>
+					{% endfor %}
+				</ul>
+			</div>
+			{% endif %}
+			{% if insight.related_concepts %}
+			<div class="mb-2">
+				<div class="text-muted small mb-1">Related Concepts</div>
+				<div class="d-flex flex-wrap gap-2">
+					{% for c in insight.related_concepts %}
+					<span class="badge rounded-pill text-bg-light border">{{ c }}</span>
+					{% endfor %}
+				</div>
+			</div>
+			{% endif %}
+			{% endif %}
+			{% if related_topics %}
+			<div class="mt-2">
+				<div class="text-muted small mb-1">Related Topics</div>
+				<ul class="small mb-0 ps-3">
+					{% for rt in related_topics %}
+					<li><a href="/collections/{{ topic.collection_id }}/graph" class="text-decoration-none">{{ rt.name }}</a> <span class="text-muted">({{ '%.2f'|format(rt.similarity) }})</span></li>
+					{% endfor %}
+				</ul>
+			</div>
+			{% endif %}
+		</div>
 	</div>
 	<h6 class="mt-3 mb-2">Q&A</h6>
 	<form class="d-flex gap-2" hx-post="/topics/{{ topic.id }}/qa" hx-target="#qa-pane" hx-indicator="#qa-loading">
@@ -33,7 +72,7 @@
 		<div class="spinner-border spinner-border-sm htmx-indicator" id="qa-loading" role="status"></div>
 	</form>
 	<div id="qa-pane" class="mt-2">
-		<p class="text-muted small">Answer will appear here with citations. Clicking a citation scrolls to the document in the main list.</p>
+		<p class="text-muted small">Answers include inline citations like [1]; clicking scrolls to the document in the main list.</p>
 	</div>
 </div>
 

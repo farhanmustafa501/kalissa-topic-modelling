@@ -9,45 +9,32 @@
 		<h2 class="h4 mb-0">{{ collection.name }}</h2>
 		<div class="text-muted small">{{ collection.description or 'No description' }}</div>
 	</div>
-	<div class="d-flex gap-2">
-		<button class="btn btn-outline-danger btn-sm" 
-			onclick="if(confirm('Delete this collection?')){ fetch('/api/collections/{{ collection.id }}', { method: 'DELETE' }).then(()=>window.location='/collections'); }">Delete</button>
 		<a href="/collections" class="btn btn-outline-secondary btn-sm">Back</a>
-	</div>
 	</div>
 <div class="row g-3">
 	<div class="col-lg-8">
 		<div class="card">
 			<div class="card-body">
 				<h6 class="card-title">Documents & Discovery</h6>
-				<div id="selected-files" class="small text-muted mb-2" style="min-height:1.5rem;"></div>
-				<form 
-					hx-post="/api/collections/{{ collection.id }}/documents/upload_files" 
-					hx-trigger="change from:#file-input" 
-					hx-target="#action-result" 
-					hx-indicator="#action-loading" 
-					enctype="multipart/form-data" 
-					hx-on::afterRequest="reloadDocs(); reloadGraph();">
-					<div class="mb-2">
-						<input id="file-input" class="form-control" type="file" name="files" multiple onchange="showSelectedFiles(event)" />
-						<div class="form-text">Select files to upload (auto-uploads): txt, md, pdf, docx. Max 10MB each, up to 20 files.</div>
-					</div>
-					<div class="d-flex align-items-center gap-2">
-						<button class="btn btn-primary btn-sm" type="button" 
-							onclick="showJobStatus()"
-							hx-post="/api/collections/{{ collection.id }}/discover" 
-							hx-target="#action-result" 
-							hx-indicator="#action-loading" 
-							hx-on::afterRequest="reloadGraph()">Run Discovery</button>
-						<div class="spinner-border spinner-border-sm htmx-indicator" id="action-loading" role="status"></div>
-					</div>
-				</form>
-				<pre id="action-result" class="mt-3 mb-0 small bg-light p-2 rounded"></pre>
+				<div class="mb-3">
+					<input id="file-input" class="form-control" type="file" name="files" multiple onchange="handleFileSelection(event)" />
+					<div class="form-text">Select files to upload: txt, md, pdf, docx. Max 10MB each, up to 20 files.</div>
+				</div>
+				<div id="selected-files-list" class="mb-3"></div>
+				<div class="d-flex align-items-center gap-2">
+					<button class="btn btn-primary btn-sm" type="button" 
+						id="run-discovery-btn"
+						onclick="startDiscoveryProcess(event)">
+						Run Discovery
+					</button>
+					<div class="spinner-border spinner-border-sm d-none" id="action-loading" role="status"></div>
+				</div>
+				<div id="action-result" class="mt-3"></div>
 				<div id="job-status-block" class="mt-3 d-none">
 					<div id="job-status" class="mb-2"></div>
 					<div 
 						hx-get="/ui/collections/{{ collection.id }}/discover/status"
-						hx-trigger="every 3s"
+						hx-trigger="every 2s"
 						hx-target="#job-status"
 						hx-swap="outerHTML">
 						<!-- discovery status -->
@@ -70,7 +57,7 @@
 		</div>
 	</div>
 	<div class="col-lg-4">
-		<div class="card">
+		<div class="card" style="position: sticky; top: 84px;">
 			<div class="card-body">
 				<h6 class="card-title">Documents</h6>
 				<div class="d-flex gap-2 mb-2">
@@ -82,16 +69,179 @@
 	</div>
 </div>
 <script>
-function showSelectedFiles(e) {
-	const el = document.getElementById('selected-files');
-	const files = e.target.files || [];
-	if (!files.length) { el.textContent = ''; return; }
-	const names = Array.from(files).map(f => f.name);
-	el.textContent = `${files.length} selected: ` + names.join(', ');
+// Store selected files
+let selectedFiles = [];
+
+function handleFileSelection(e) {
+	const files = Array.from(e.target.files || []);
+	selectedFiles = files;
+	renderSelectedFiles();
+}
+
+function renderSelectedFiles() {
+	const container = document.getElementById('selected-files-list');
+	if (!selectedFiles || selectedFiles.length === 0) {
+		container.innerHTML = '';
+		return;
+	}
+	
+	let html = '<div class="small mb-2"><strong>Selected Files (' + selectedFiles.length + '):</strong></div>';
+	html += '<div class="list-group list-group-flush">';
+	selectedFiles.forEach((file, index) => {
+		let size;
+		if (file.size < 1024) {
+			size = file.size + ' B';
+		} else if (file.size < 1024 * 1024) {
+			size = (file.size / 1024).toFixed(1) + ' KB';
+		} else {
+			size = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+		}
+		html += `
+			<div class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-start-0 border-end-0">
+				<div class="flex-grow-1">
+					<div class="fw-medium">${file.name}</div>
+					<small class="text-muted">${size}</small>
+				</div>
+				<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeFile(${index})">
+					Remove
+				</button>
+			</div>
+		`;
+	});
+	html += '</div>';
+	container.innerHTML = html;
+}
+
+function removeFile(index) {
+	selectedFiles.splice(index, 1);
+	renderSelectedFiles();
+	// Update the file input
+	const fileInput = document.getElementById('file-input');
+	const dt = new DataTransfer();
+	selectedFiles.forEach(file => dt.items.add(file));
+	fileInput.files = dt.files;
+}
+
+async function startDiscoveryProcess(ev) {
+	ev.preventDefault();
+	ev.stopPropagation();
+	
+	const resultEl = document.getElementById('action-result');
+	const loadingEl = document.getElementById('action-loading');
+	const btn = document.getElementById('run-discovery-btn');
+	
+	// Disable button and show loading
+	btn.disabled = true;
+	loadingEl.classList.remove('d-none');
+	resultEl.innerHTML = '';
+	
+	try {
+		// Step 1: Upload files if any are selected
+		if (selectedFiles && selectedFiles.length > 0) {
+			resultEl.innerHTML = '<div class="alert alert-info mb-2"><strong>Step 1:</strong> Uploading ' + selectedFiles.length + ' file(s)...</div>';
+			
+			const formData = new FormData();
+			selectedFiles.forEach(file => {
+				formData.append('files', file);
+			});
+			
+			const uploadRes = await fetch(`/api/collections/{{ collection.id }}/documents/upload_files`, {
+				method: 'POST',
+				body: formData
+			});
+			
+			if (!uploadRes.ok) {
+				const errorText = await uploadRes.text();
+				let errorMsg = 'File upload failed';
+				try {
+					const errorData = JSON.parse(errorText);
+					errorMsg = errorData.error || errorMsg;
+				} catch {
+					errorMsg = errorText.substring(0, 200);
+				}
+				throw new Error(errorMsg);
+			}
+			
+			const uploadData = await uploadRes.json();
+			const createdCount = uploadData.created_count || 0;
+			const rejectedCount = uploadData.rejected ? uploadData.rejected.length : 0;
+			
+			let successMsg = `<strong>Step 1 Complete:</strong> Uploaded ${createdCount} file(s)`;
+			if (rejectedCount > 0) {
+				successMsg += `<br><small class="text-warning">⚠ ${rejectedCount} file(s) rejected`;
+				if (uploadData.rejected && uploadData.rejected.length > 0) {
+					const reasons = uploadData.rejected.map(r => r.reason || 'Unknown').join(', ');
+					successMsg += `: ${reasons}`;
+				}
+				successMsg += '</small>';
+			}
+			
+			resultEl.innerHTML = `<div class="alert alert-success mb-2">${successMsg}</div>`;
+			
+			// Clear selected files after successful upload
+			selectedFiles = [];
+			renderSelectedFiles();
+			const fileInput = document.getElementById('file-input');
+			fileInput.value = '';
+			
+			// Reload documents list
+			await reloadDocs();
+		} else {
+			// No files selected, check if there are existing documents
+			const existingDocs = await fetch(`/api/collections/{{ collection.id }}/documents`).then(r => r.json()).catch(() => []);
+			if (!existingDocs || existingDocs.length === 0) {
+				throw new Error('No files selected and no existing documents. Please select files to upload first.');
+			}
+		}
+		
+		// Step 2: Start discovery
+		resultEl.innerHTML += '<div class="alert alert-info mb-2"><strong>Step 2:</strong> Starting topic discovery...</div>';
+		
+		const discoverRes = await fetch(`/api/collections/{{ collection.id }}/discover`, {
+			method: 'POST'
+		});
+		
+		if (!discoverRes.ok) {
+			const errorText = await discoverRes.text();
+			throw new Error('Discovery start failed: ' + errorText);
+		}
+		
+		const discoverData = await discoverRes.json();
+		resultEl.innerHTML += `
+			<div class="alert alert-success mb-2">
+				<strong>Step 2 Complete:</strong> Discovery job started (ID: ${discoverData.job_id})
+			</div>
+		`;
+		
+		// Show job status polling
+		showJobStatus();
+		
+		// Update snapshot key
+		lastDiscoverySnapshotKey = docsSnapshotKey;
+		
+		// Reload graph after a delay
+		setTimeout(() => reloadGraph(), 2000);
+		
+	} catch (error) {
+		resultEl.innerHTML = `
+			<div class="alert alert-danger mb-2">
+				<strong>Error:</strong> ${error.message}
+			</div>
+		`;
+		console.error('Discovery process error:', error);
+	} finally {
+		btn.disabled = false;
+		loadingEl.classList.add('d-none');
+	}
 }
 function showJobStatus() {
 	const blk = document.getElementById('job-status-block');
 	if (blk) blk.classList.remove('d-none');
+	// ensure polling is active
+	const pollWrapper = blk ? blk.querySelector('[hx-get]') : null;
+	if (pollWrapper) {
+		pollWrapper.setAttribute('hx-trigger', 'every 3s');
+	}
 }
 let cyInstance = null;
 function loadTopicDetailsByNodeId(nodeId){
@@ -113,7 +263,7 @@ async function initGraph() {
 		const data = await res.json();
 		const elements = [
 			...data.nodes.map(n => ({ data: { id: n.id, label: n.label, size: Math.max(20, Math.round(20 + (n.size_score || 0) * 30)) } })),
-			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight } }))
+			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight, type: e.type || 'RELATED' } }))
 		];
 		const renderGraph = () => {
 			if (!cyInstance) {
@@ -121,8 +271,36 @@ async function initGraph() {
 					container: document.getElementById('cy'),
 					elements,
 					style: [
-						{ selector: 'node', style: { 'label': 'data(label)', 'background-color': '#4f46e5', 'color': '#fff', 'text-valign': 'center', 'width': 'data(size)', 'height': 'data(size)', 'font-size': 10 } },
-						{ selector: 'edge', style: { 'width': 2, 'line-color': '#a5b4fc', 'target-arrow-color': '#a5b4fc' } },
+						{ selector: 'node', style: { 
+							'label': 'data(label)', 
+							'background-color': 'mapData(size, 20, 50, #60a5fa, #4f46e5)', 
+							'color': '#fff', 
+							'text-valign': 'center', 
+							'text-halign': 'center', 
+							'text-wrap': 'wrap', 
+							'text-max-width': '80px', 
+							'text-overflow': 'ellipsis', 
+							'width': 'data(size)', 
+							'height': 'data(size)', 
+							'font-size': 'mapData(size, 20, 50, 8, 12)', 
+							'text-background-opacity': 0.0 
+						} },
+						{ selector: 'node:hover', style: { 'border-width': 2, 'border-color': '#111827' } },
+						{ selector: 'edge', style: { 
+							'width': 'mapData(weight, 0, 1, 1, 4)', 
+							'line-color': '#a5b4fc', 
+							'opacity': 'mapData(weight, 0, 1, 0.25, 0.8)',
+							'target-arrow-color': '#a5b4fc', 
+							'curve-style': 'bezier', 
+							'target-arrow-shape': 'triangle', 
+							'label': 'data(type)', 
+							'font-size': 8, 
+							'text-rotation': 'autorotate', 
+							'text-margin-y': -4, 
+							'color': '#6b7280' 
+						} },
+						{ selector: 'edge:hover', style: { 'line-color': '#6366f1', 'width': 4 } },
+						{ selector: '.faded', style: { 'opacity': 0.15 } },
 						{ selector: ':selected', style: { 'background-color': '#111827' } }
 					],
 					layout: { name: 'cose', fit: true, padding: 20 }
@@ -130,6 +308,15 @@ async function initGraph() {
 				cyInstance.on('tap', 'node', (evt) => {
 					const id = evt.target.id();
 					loadTopicDetailsByNodeId(id);
+					// focus neighborhood
+					const nb = evt.target.closedNeighborhood();
+					cyInstance.elements().removeClass('faded');
+					cyInstance.elements().difference(nb).addClass('faded');
+				});
+				cyInstance.on('tap', (evt) => {
+					if (evt.target === cyInstance) {
+						cyInstance.elements().removeClass('faded');
+					}
 				});
 			} else {
 				cyInstance.elements().remove();
@@ -149,6 +336,66 @@ async function initGraph() {
 }
 function reloadGraph() { initGraph(); }
 (async function init() { await reloadDocs(); await initGraph(); })();
+
+// Docs UI state
+let allDocsCache = [];
+let docsPage = 1;
+const docsPageSize = 10;
+let docsSnapshotKey = '';
+let lastDiscoverySnapshotKey = '';
+
+function computeSnapshotKey(docs) {
+	try {
+		return (docs || []).map(d => d.id).join(',');
+	} catch { return ''; }
+}
+
+function renderDocsPage() {
+	const container = document.getElementById('docs-list');
+	container.innerHTML = '';
+	if (!allDocsCache.length) {
+		container.innerHTML = '<span class="text-muted">No documents yet. Select files to upload.</span>';
+		return;
+	}
+	const total = allDocsCache.length;
+	const totalPages = Math.max(1, Math.ceil(total / docsPageSize));
+	if (docsPage > totalPages) docsPage = totalPages;
+	if (docsPage < 1) docsPage = 1;
+	const start = (docsPage - 1) * docsPageSize;
+	const end = Math.min(start + docsPageSize, total);
+	const ul = document.createElement('ul');
+	ul.className = 'list-unstyled mb-0';
+	allDocsCache.slice(start, end).forEach(d => {
+		const li = document.createElement('li');
+		li.id = 'doc-' + d.id;
+		li.className = 'border-bottom py-2';
+		const previewHtml = d.preview ? `<div class="doc-preview truncate-2">${d.preview}</div>` : '';
+		li.innerHTML = `<div class="doc-list-item"><div class="doc-title truncate-1">${d.title}</div>${previewHtml}</div>`;
+		ul.appendChild(li);
+	});
+	container.appendChild(ul);
+	// pager
+	const pager = document.createElement('div');
+	pager.className = 'pager';
+	const prevBtn = document.createElement('button');
+	prevBtn.className = 'btn btn-outline-secondary btn-sm';
+	prevBtn.textContent = 'Previous';
+	prevBtn.disabled = docsPage <= 1;
+	prevBtn.onclick = () => { docsPage -= 1; renderDocsPage(); };
+	const info = document.createElement('div');
+	info.className = 'pager-info';
+	info.textContent = `Showing ${start + 1}-${end} of ${total}`;
+	const nextBtn = document.createElement('button');
+	nextBtn.className = 'btn btn-outline-secondary btn-sm';
+	nextBtn.textContent = 'Next';
+	nextBtn.disabled = docsPage >= totalPages;
+	nextBtn.onclick = () => { docsPage += 1; renderDocsPage(); };
+	pager.appendChild(prevBtn);
+	pager.appendChild(info);
+	pager.appendChild(nextBtn);
+	container.appendChild(pager);
+}
+
 async function reloadDocs() {
 	try {
 		const res = await fetch('/api/collections/{{ collection.id }}/documents');
@@ -159,27 +406,61 @@ async function reloadDocs() {
 			return;
 		}
 		const data = await res.json();
-		container.innerHTML = '';
-		if (!Array.isArray(data) || data.length === 0) {
-			container.innerHTML = '<span class="text-muted">No documents yet. Select files to upload.</span>';
-			return;
+		allDocsCache = Array.isArray(data) ? data : [];
+		docsSnapshotKey = computeSnapshotKey(allDocsCache);
+		if (!lastDiscoverySnapshotKey) {
+			// Initialize baseline on first load
+			lastDiscoverySnapshotKey = docsSnapshotKey;
 		}
-		const ul = document.createElement('ul');
-		ul.className = 'list-unstyled mb-0';
-		data.forEach(d => {
-			const li = document.createElement('li');
-			li.id = 'doc-' + d.id;
-			li.className = 'border-bottom py-2';
-			const preview = d.preview ? `<div class=\"text-muted small\">${d.preview}</div>` : '';
-			li.innerHTML = `<div class=\"d-flex justify-content-between align-items-center\"><strong>${d.title}</strong></div>${preview}`;
-			ul.appendChild(li);
-		});
-		container.appendChild(ul);
+		docsPage = 1;
+		renderDocsPage();
 	} catch (e) {
 		document.getElementById('docs-list').innerHTML = '<span class="text-danger">Failed to load documents.</span>';
 	}
 }
+
+function renderActionMessage(msg, type = 'warning') {
+	const out = document.getElementById('action-result');
+	out.textContent = '';
+	out.classList.remove('bg-light');
+	out.classList.add('alert', `alert-${type}`);
+	out.textContent = msg;
+	// auto-clear after a while for warnings
+	if (type !== 'danger') {
+		setTimeout(() => {
+			out.classList.remove('alert', `alert-${type}`);
+			out.classList.add('bg-light');
+			out.textContent = '';
+		}, 2500);
+	}
+}
+
+// Legacy function - kept for compatibility but not used
+function runDiscoveryIfNeeded(ev) {
+	return true;
+}
+
+function afterDiscoveryRequested(e) {
+	// Handled in startDiscoveryProcess now
+}
+
+// Hide/stop job status when completed; reset fresh for each new job
+document.body.addEventListener('htmx:afterSwap', function (evt) {
+	const tgt = evt.target;
+	if (!tgt) return;
+	if (tgt.id === 'job-status') {
+		const state = tgt.getAttribute('data-job-state') || '';
+		if (state === 'SUCCEEDED' || state === 'FAILED') {
+			// Hide the block and stop polling by removing the polling element
+			const blk = document.getElementById('job-status-block');
+			if (blk) blk.classList.add('d-none');
+			// Stop polling by disabling the trigger (keep element for next runs)
+			const pollWrapper = blk ? blk.querySelector('[hx-get]') : null;
+			if (pollWrapper) {
+				pollWrapper.setAttribute('hx-trigger', 'none');
+			}
+		}
+	}
+});
 </script>
 {% endblock %}
-
-

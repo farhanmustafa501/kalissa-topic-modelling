@@ -93,7 +93,7 @@
 				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 			</div>
 			<div class="modal-body">
-				<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading" hx-on::afterRequest="(function(e){try{var d=JSON.parse(e.detail.xhr.responseText);if(d&&d.id){var m=bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));if(m){m.hide();}window.location='/collections/'+d.id;}}catch(err){console.error(err);}})(event)">
+				<form hx-post="/api/collections" hx-swap="none" hx-indicator="#create-loading" hx-on::afterRequest="(function(e){try{var t=e.detail.xhr.responseText||'';var d={};try{d=JSON.parse(t);}catch(_){d={};}if(d&&d.id){var m=bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));if(m){m.hide();}window.location='/collections/'+d.id;}else{window.location='/collections';}}catch(err){console.error(err);}})(event)">
 					<div class="mb-2">
 						<label class="form-label">Name</label>
 						<input class="form-control" name="name" required />
@@ -106,7 +106,6 @@
 						<button class="btn btn-primary" type="submit">Create</button>
 						<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status"></div>
 					</div>
-					<pre id="create-result" class="mt-2 small bg-light p-2 rounded"></pre>
 				</form>
 			</div>
 		</div>

@@ -11,7 +11,7 @@
 			<div class="text-muted small">Interactive graph of topics and relationships</div>
 		</div>
 		<div class="d-flex align-items-center gap-2">
-			<button class="btn btn-primary btn-sm" hx-post="/api/collections/{{ collection_id }}/discover" hx-target="#job-status" hx-indicator="#job-loading">Run Discovery</button>
+			<button class="btn btn-primary btn-sm" hx-post="/api/collections/{{ collection_id }}/discover" hx-swap="none" hx-indicator="#job-loading">Run Discovery</button>
 			<div class="spinner-border spinner-border-sm htmx-indicator" id="job-loading" role="status"></div>
 		</div>
 	</div>
@@ -79,11 +79,39 @@
 		container: document.getElementById('cy'),
 		elements: [
 			...data.nodes.map(n => ({ data: { id: n.id, label: n.label, size: Math.max(20, Math.round(20 + (n.size_score || 0) * 30)) } })),
-			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight } }))
+			...data.edges.map(e => ({ data: { id: e.source + '_' + e.target, source: e.source, target: e.target, weight: e.weight, type: e.type || 'RELATED' } }))
 		],
 		style: [
-			{ selector: 'node', style: { 'label': 'data(label)', 'background-color': '#4f46e5', 'color': '#fff', 'text-valign': 'center', 'width': 'data(size)', 'height': 'data(size)', 'font-size': 10 } },
-			{ selector: 'edge', style: { 'width': 2, 'line-color': '#a5b4fc', 'target-arrow-color': '#a5b4fc' } },
+			{ selector: 'node', style: { 
+				'label': 'data(label)', 
+				'background-color': 'mapData(size, 20, 50, #60a5fa, #4f46e5)', 
+				'color': '#fff', 
+				'text-valign': 'center', 
+				'text-halign': 'center', 
+				'text-wrap': 'wrap', 
+				'text-max-width': '80px', 
+				'text-overflow': 'ellipsis', 
+				'width': 'data(size)', 
+				'height': 'data(size)', 
+				'font-size': 'mapData(size, 20, 50, 8, 12)', 
+				'text-background-opacity': 0.0 
+			} },
+			{ selector: 'node:hover', style: { 'border-width': 2, 'border-color': '#111827' } },
+			{ selector: 'edge', style: { 
+				'width': 'mapData(weight, 0, 1, 1, 4)', 
+				'line-color': '#a5b4fc', 
+				'opacity': 'mapData(weight, 0, 1, 0.25, 0.8)',
+				'target-arrow-color': '#a5b4fc', 
+				'curve-style': 'bezier', 
+				'target-arrow-shape': 'triangle', 
+				'label': 'data(type)', 
+				'font-size': 8, 
+				'text-rotation': 'autorotate', 
+				'text-margin-y': -4, 
+				'color': '#6b7280' 
+			} },
+			{ selector: 'edge:hover', style: { 'line-color': '#6366f1', 'width': 4 } },
+			{ selector: '.faded', style: { 'opacity': 0.15 } },
 			{ selector: ':selected', style: { 'background-color': '#111827' } }
 		],
 		layout: { name: 'cose', fit: true, padding: 20 }
@@ -92,6 +120,14 @@
 	cy.on('tap', 'node', (evt) => {
 		const id = evt.target.id();
 		htmx.ajax('GET', '/ui/topics/' + id.replace('t',''), '#topic-detail-pane');
+		const nb = evt.target.closedNeighborhood();
+		cy.elements().removeClass('faded');
+		cy.elements().difference(nb).addClass('faded');
+	});
+	cy.on('tap', (evt) => {
+		if (evt.target === cy) {
+			cy.elements().removeClass('faded');
+		}
 	});
 })();
 </script>

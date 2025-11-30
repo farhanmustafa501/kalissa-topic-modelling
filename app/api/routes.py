@@ -3,14 +3,14 @@ import os
 import logging
 from threading import Thread
 from datetime import datetime
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import SessionLocal, ensure_tables_initialized
-from app.models import Collection, Document, Topic, TopicRelationship, DiscoveryJob, JobStatusEnum, TopicInsight, DocumentTopic
+from app.models import Collection, Document, Chunk, Topic, TopicRelationship, DiscoveryJob, JobStatusEnum, TopicInsight, DocumentTopic
 from app.services.parser import extract_text_from_upload
-from app.services.embeddings import get_embedding_for_text
 from app.services.discovery import run_discovery
+from app.services.ai import answer_question_with_citations
 
 api_bp = Blueprint("api", __name__)
 ui_bp = Blueprint("ui", __name__)
@@ -43,57 +43,90 @@ def index():
 
 
 def _run_discovery_async(job_id: int, collection_id: int) -> None:
-	"""Background thread entry: run discovery and update job row."""
+	"""
+	Background thread entry: run discovery and update job row.
+	
+	This function runs in a separate thread to avoid blocking the HTTP request.
+	It handles the complete topic discovery pipeline.
+	"""
 	session = SessionLocal()
 	try:
 		job = session.get(DiscoveryJob, job_id)
 		if not job:
+			logger.warning("Discovery job not found", extra={"job_id": job_id})
 			return
-		logger.info("discovery thread start", extra={"collection_id": collection_id, "job_id": job_id})
+		
+		logger.info("Discovery thread started", extra={"collection_id": collection_id, "job_id": job_id})
+		
+		# Run the discovery pipeline
 		run_discovery(session, collection_id, job)
-		# mark finished
+		
+		# Mark job as finished (if not already marked by run_discovery)
 		job = session.get(DiscoveryJob, job_id)
-		if job:
+		if job and job.status == JobStatusEnum.RUNNING:
 			job.finished_at = datetime.utcnow()
+			if job.status != JobStatusEnum.SUCCEEDED and job.status != JobStatusEnum.FAILED:
+				job.status = JobStatusEnum.SUCCEEDED
 			session.add(job)
 			session.commit()
-		logger.info("discovery thread done", extra={"collection_id": collection_id, "job_id": job_id})
-	except Exception:
-		logger.exception("discovery thread failed", extra={"collection_id": collection_id, "job_id": job_id})
+		
+		logger.info("Discovery thread completed", extra={"collection_id": collection_id, "job_id": job_id, "status": job.status if job else "unknown"})
+	except Exception as e:
+		logger.exception("Discovery thread failed", extra={"collection_id": collection_id, "job_id": job_id, "error": str(e)})
 		try:
 			j = session.get(DiscoveryJob, job_id)
 			if j:
 				j.status = JobStatusEnum.FAILED
-				j.error_message = "Unhandled error"
+				j.error_message = str(e)[:500] if str(e) else "Unhandled error"
 				j.finished_at = datetime.utcnow()
 				session.add(j)
 				session.commit()
-		except Exception:
-			logger.exception("failed to persist job failure")
+				logger.info("Job failure persisted", extra={"job_id": job_id})
+		except Exception as inner_e:
+			logger.exception("Failed to persist job failure", extra={"job_id": job_id, "inner_error": str(inner_e)})
 	finally:
 		session.close()
 
 
 @api_bp.post("/collections/<int:collection_id>/discover")
 def discover_collection(collection_id: int):
+	"""
+	Start topic discovery job for a collection.
+	
+	Creates a discovery job and runs it in a background thread.
+	The pipeline includes: chunking, embedding, clustering, topic labeling, and relationship building.
+	"""
 	logger.info("discover_collection start", extra={"collection_id": collection_id})
-	# Create job row and run discovery in a background thread (no Celery)
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
-		job = DiscoveryJob(collection_id=collection_id, status=JobStatusEnum.PENDING, mode="FULL", started_at=datetime.utcnow(), progress_step=0, progress_total_steps=5)
+		# Check if collection exists
+		c = session.get(Collection, collection_id)
+		if not c:
+			return jsonify({"error": "Collection not found"}), 404
+		
+		# Create job with correct total steps (10 steps in the pipeline)
+		job = DiscoveryJob(
+			collection_id=collection_id,
+			status=JobStatusEnum.PENDING,
+			mode="FULL",
+			started_at=datetime.utcnow(),
+			progress_step=0,
+			progress_total_steps=10
+		)
 		session.add(job)
 		session.flush()
-		c = session.get(Collection, collection_id)
-		if c:
-			c.last_discovery_job_id = job.id
+		c.last_discovery_job_id = job.id
 		session.commit()
 
+		# Start discovery in background thread
 		Thread(target=_run_discovery_async, args=(job.id, collection_id), daemon=True).start()
+		logger.info("Discovery job enqueued", extra={"collection_id": collection_id, "job_id": job.id})
 		return jsonify({"job_id": job.id, "collection_id": collection_id, "status": "ENQUEUED"})
-	except Exception:
-		logger.exception("failed to start discovery thread")
-		return jsonify({"error": "failed to start discovery"}), 500
+	except Exception as e:
+		logger.exception("failed to start discovery thread", extra={"collection_id": collection_id, "error": str(e)})
+		session.rollback()
+		return jsonify({"error": f"failed to start discovery: {str(e)}"}), 500
 	finally:
 		session.close()
 
@@ -122,6 +155,22 @@ def discover_status(collection_id: int):
 	finally:
 		session.close()
 
+@api_bp.delete("/collections/<int:collection_id>/discover/last_job")
+def delete_last_discovery_job(collection_id: int):
+	ensure_tables_initialized()
+	session = SessionLocal()
+	try:
+		row = session.scalars(select(DiscoveryJob).where(DiscoveryJob.collection_id == collection_id).order_by(DiscoveryJob.id.desc())).first()
+		if not row:
+			return jsonify({"status": "no_job"}), 404
+		session.delete(row)
+		session.commit()
+		return jsonify({"status": "deleted", "job_id": row.id})
+	except SQLAlchemyError as e:
+		session.rollback()
+		return jsonify({"error": str(e)}), 500
+	finally:
+		session.close()
 
 @api_bp.post("/collections/<int:collection_id>/documents")
 def add_documents(collection_id: int):
@@ -244,16 +293,38 @@ def upload_documents_files(collection_id: int):
 
 @api_bp.get("/collections/<int:collection_id>/documents")
 def list_documents_in_collection(collection_id: int):
+	"""
+	List all documents in a collection.
+	
+	Note: Embeddings are now stored at the chunk level, not document level.
+	"""
 	logger.info("list_documents start", extra={"collection_id": collection_id})
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
-		rows = session.scalars(select(Document).where(Document.collection_id == collection_id).order_by(Document.created_at.desc())).all()
+		rows = session.scalars(
+			select(Document)
+			.where(Document.collection_id == collection_id)
+			.order_by(Document.created_at.desc())
+		).all()
+		
+		# Count chunks per document
+		doc_ids = [d.id for d in rows]
+		chunk_counts = {}
+		if doc_ids:
+			chunk_stats = session.execute(
+				select(Chunk.document_id, func.count(Chunk.id).label("chunk_count"))
+				.where(Chunk.document_id.in_(doc_ids))
+				.group_by(Chunk.document_id)
+			).all()
+			chunk_counts = {stat.document_id: stat.chunk_count for stat in chunk_stats}
+		
 		resp = [
 			{
 				"id": d.id,
 				"title": d.title,
-				"has_embedding": (d.embedding is not None),
+				"has_chunks": (chunk_counts.get(d.id, 0) > 0),
+				"chunk_count": chunk_counts.get(d.id, 0),
 				"preview": d.preview,
 				"created_at": d.created_at.isoformat() if d.created_at else None,
 			}
@@ -265,41 +336,21 @@ def list_documents_in_collection(collection_id: int):
 		session.close()
 
 
+# Note: Embeddings are now generated automatically during topic discovery
+# This endpoint is deprecated but kept for backward compatibility
 @api_bp.post("/collections/<int:collection_id>/embeddings/extract")
 def extract_embeddings_for_collection(collection_id: int):
 	"""
-	Compute and save embeddings for documents in the collection that are missing embeddings.
-	This uses a deterministic mock embedding generator (no external API calls).
+	DEPRECATED: Embeddings are now generated automatically during topic discovery.
+	This endpoint is kept for backward compatibility but does nothing.
 	"""
-	logger.info("extract_embeddings start", extra={"collection_id": collection_id})
-	ensure_tables_initialized()
-	session = SessionLocal()
-	try:
-		reembed_all = (request.args.get("reembed_all") or request.form.get("reembed_all") or "").lower() in ("1", "true", "yes")
-		q = select(Document).where(Document.collection_id == collection_id)
-		rows = session.scalars(q).all()
-		processed = 0
-		for d in rows:
-			if not reembed_all and d.embedding is not None:
-				continue
-			if not (d.content or "").strip():
-				continue
-			try:
-				emb = get_embedding_for_text(d.content)
-				d.embedding = emb
-				processed += 1
-			except Exception:
-				logger.exception("embedding failed for doc", extra={"doc_id": d.id})
-				continue
-		session.commit()
-		logger.info("extract_embeddings done", extra={"collection_id": collection_id, "processed": processed})
-		return jsonify({"collection_id": collection_id, "processed": processed, "status": "OK"})
-	except SQLAlchemyError as e:
-		session.rollback()
-		logger.exception("extract_embeddings db error")
-		return jsonify({"error": str(e)}), 500
-	finally:
-		session.close()
+	logger.warning("extract_embeddings endpoint called but is deprecated", extra={"collection_id": collection_id})
+	return jsonify({
+		"collection_id": collection_id,
+		"processed": 0,
+		"status": "DEPRECATED",
+		"message": "Embeddings are now generated automatically during topic discovery. Use /collections/<id>/discover instead."
+	})
 
 
 @api_bp.get("/collections/<int:collection_id>/topics/graph")
@@ -379,29 +430,66 @@ def topic_detail(topic_id: int):
 
 @api_bp.post("/topics/<int:topic_id>/qa")
 def topic_qa(topic_id: int):
+	"""
+	Topic-scoped Q&A with citations using GPT-4o.
+	
+	Returns HTML answer with inline citations that map to document chunks.
+	Uses top 10 chunks from documents in the topic for context.
+	"""
 	question = (request.get_json(silent=True) or {}).get("question") or request.form.get("question") or ""
-	# Placeholder answer that cites top two docs for the topic
+	
+	if not question or not question.strip():
+		return '<div class="qa-answer">Please provide a question.</div>'
+	
+	logger.info("Topic Q&A request", extra={"topic_id": topic_id, "question_length": len(question)})
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
-		docs = session.execute(
+		# Get documents in this topic
+		doc_rows = session.execute(
 			select(Document, DocumentTopic)
 			.where(Document.id == DocumentTopic.document_id)
 			.where(DocumentTopic.topic_id == topic_id)
 			.order_by(DocumentTopic.relevance_score.desc())
-			.limit(2)
 		).all()
-		cites = []
-		for i, d in enumerate(docs, start=1):
-			cites.append({"marker": f"[{i}]", "document_id": str(d.Document.id)})
-		return jsonify(
-			{
-				"topic_id": topic_id,
-				"question": question,
-				"answer": "This is a heuristic answer. See citations for details.",
-				"citations": cites,
-			}
-		)
+		
+		if not doc_rows:
+			return '<div class="qa-answer">No documents found for this topic.</div>'
+		
+		# Get chunks from these documents, ordered by relevance
+		doc_ids = [r.Document.id for r in doc_rows]
+		chunks = session.scalars(
+			select(Chunk)
+			.where(Chunk.document_id.in_(doc_ids))
+			.where(Chunk.embedding.isnot(None))
+			.order_by(Chunk.document_id, Chunk.chunk_index)
+			.limit(10)  # Top 10 chunks
+		).all()
+		
+		if not chunks:
+			return '<div class="qa-answer">No relevant chunks found for this topic.</div>'
+		
+		# Build context chunks with proper IDs (format: D{doc_id}-C{chunk_index})
+		context_chunks = []
+		for chunk in chunks:
+			doc = next((r.Document for r in doc_rows if r.Document.id == chunk.document_id), None)
+			if doc:
+				chunk_id = f"D{chunk.document_id}-C{chunk.chunk_index}"
+				context_chunks.append({
+					"id": chunk_id,
+					"text": chunk.text,
+					"document_id": chunk.document_id,
+					"title": doc.title,
+				})
+		
+		logger.debug("Q&A context prepared", extra={"num_chunks": len(context_chunks)})
+		
+		# Generate answer with citations
+		html = answer_question_with_citations(question, context_chunks)
+		return html
+	except Exception as e:
+		logger.exception("Topic Q&A failed", extra={"topic_id": topic_id, "error": str(e)})
+		return '<div class="qa-answer">An error occurred while generating the answer.</div>'
 	finally:
 		session.close()
 
@@ -428,7 +516,20 @@ def ui_topic(topic_id: int):
 			.where(DocumentTopic.topic_id == topic_id)
 			.order_by(DocumentTopic.relevance_score.desc())
 		).all()
-		return render_template("topic_detail.html", topic=t, insight=ins, ranked_docs=docs)
+		# Related topics via relationships
+		rel_rows = session.scalars(
+			select(TopicRelationship).where(
+				(TopicRelationship.source_topic_id == topic_id) | (TopicRelationship.target_topic_id == topic_id)
+			)
+		).all()
+		related = []
+		for r in rel_rows:
+			other_id = r.target_topic_id if r.source_topic_id == topic_id else r.source_topic_id
+			other = session.get(Topic, other_id)
+			if other:
+				related.append({"id": other.id, "name": other.name, "similarity": r.similarity_score or 0.0})
+		related.sort(key=lambda x: x["similarity"], reverse=True)
+		return render_template("topic_detail.html", topic=t, insight=ins, ranked_docs=docs, related_topics=related)
 	finally:
 		session.close()
 

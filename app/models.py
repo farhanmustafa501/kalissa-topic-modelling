@@ -63,6 +63,25 @@ class Document(Base):
 
 	collection: Mapped[Collection] = relationship(back_populates="documents")
 	document_topics: Mapped[List["DocumentTopic"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+	chunks: Mapped[List["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class Chunk(Base):
+	"""
+	Represents a text chunk from a document.
+	Chunks are created by splitting documents into smaller pieces (800-1200 tokens)
+	for better embedding and clustering.
+	"""
+	__tablename__ = "chunks"
+
+	id: Mapped[int] = mapped_column(Integer, primary_key=True)
+	document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), nullable=False, index=True)
+	chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
+	text: Mapped[str] = mapped_column(Text, nullable=False)
+	embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(1536), nullable=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+	document: Mapped[Document] = relationship(back_populates="chunks")
 
 
 class Topic(Base):

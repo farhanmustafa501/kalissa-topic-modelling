@@ -17,7 +17,13 @@
 					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 				</div>
 				<div class="modal-body">
-					<form hx-post="/api/collections" hx-target="#create-result" hx-indicator="#create-loading" hx-on::afterRequest="(function(e){try{var d=JSON.parse(e.detail.xhr.responseText);if(d&&d.id){var m=bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));if(m){m.hide();}window.location='/collections/'+d.id;}}catch(err){console.error(err);}})(event)">
+					<form 
+						hx-post="/api/collections" 
+						hx-swap="none" 
+						hx-trigger="submit"
+						hx-indicator="#create-loading"
+						onsubmit="event.preventDefault(); return true;"
+						hx-on::afterRequest="handleCollectionCreate(event)">
 						<div class="mb-2">
 							<label class="form-label">Name</label>
 							<input class="form-control" name="name" required />
@@ -30,7 +36,6 @@
 							<button class="btn btn-primary" type="submit">Create</button>
 							<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status"></div>
 						</div>
-						<pre id="create-result" class="mt-2 small bg-light p-2 rounded"></pre>
 					</form>
 				</div>
 			</div>
@@ -42,31 +47,80 @@
 	{% for c in collections %}
 	<div class="col">
 		<div class="card h-100 position-relative">
-			<a href="/collections/{{ c.id }}" class="stretched-link text-decoration-none text-reset">
-				<div class="card-body">
-					<div class="d-flex justify-content-between align-items-start">
+			<div class="card-body">
+				<div class="d-flex justify-content-between align-items-start">
+					<a href="/collections/{{ c.id }}" class="text-decoration-none text-reset flex-grow-1">
 						<div>
 							<h5 class="card-title mb-1">{{ c.name }}</h5>
 							<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
 						</div>
-						<button class="btn btn-sm btn-outline-danger" 
-							hx-delete="/api/collections/{{ c.id }}" 
-							hx-confirm="Delete this collection?" 
-							hx-target="closest .col" 
-							hx-swap="outerHTML:remove"
-							onclick="event.stopPropagation(); event.preventDefault();">
-							Delete
-						</button>
-					</div>
+					</a>
+					<button class="btn btn-sm btn-outline-danger ms-2" type="button"
+						hx-delete="/api/collections/{{ c.id }}" 
+						hx-confirm="Delete this collection?" 
+						hx-target="closest .col" 
+						hx-swap="outerHTML:remove"
+						onclick="event.stopPropagation();">
+						Delete
+					</button>
 				</div>
-			</a>
+			</div>
 		</div>
 	</div>
 	{% endfor %}
 	</div>
 {% else %}
-<div class="alert alert-info">No collections yet. Click “New Collection” to get started.</div>
+<div class="alert alert-info">No collections yet. Click "New Collection" to get started.</div>
 {% endif %}
+<script>
+function handleCollectionCreate(event) {
+	try {
+		const xhr = event.detail.xhr;
+		if (xhr.status === 201 || xhr.status === 200) {
+			const responseText = xhr.responseText || '';
+			let data = {};
+			try {
+				data = JSON.parse(responseText);
+			} catch (e) {
+				console.error('Failed to parse response:', e);
+			}
+			
+			// Close modal
+			const modal = bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));
+			if (modal) {
+				modal.hide();
+			}
+			
+			// Reset form
+			const form = document.querySelector('#newCollectionModal form');
+			if (form) {
+				form.reset();
+			}
+			
+			// Redirect to collection detail or refresh
+			if (data && data.id) {
+				window.location.href = '/collections/' + data.id;
+			} else {
+				window.location.reload();
+			}
+		} else {
+			// Show error
+			const responseText = xhr.responseText || 'Failed to create collection';
+			let errorMsg = 'Failed to create collection';
+			try {
+				const errorData = JSON.parse(responseText);
+				errorMsg = errorData.error || errorMsg;
+			} catch (e) {
+				errorMsg = responseText;
+			}
+			alert(errorMsg);
+		}
+	} catch (err) {
+		console.error('Error handling collection creation:', err);
+		alert('An error occurred while creating the collection');
+	}
+}
+</script>
 {% endblock %}
 
 
