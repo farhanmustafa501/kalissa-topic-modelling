@@ -14,79 +14,77 @@
 		</div>
 	</div>
 
-	<div class="row g-4">
-		<!-- Left Column: Insights -->
-		<div class="col-lg-6">
-			<!-- Key Themes -->
-			{% if insight and insight.key_themes %}
-			<div class="mb-4">
-				<h6 class="mb-3 d-flex align-items-center">
-					<span class="me-2">🎯</span>
-					Key Themes
-				</h6>
-				<div class="d-flex flex-wrap gap-2">
-					{% for theme in insight.key_themes %}
-					<span class="badge bg-light text-dark border px-3 py-2">{{ theme }}</span>
-					{% endfor %}
-				</div>
+	<!-- Single Column Layout: All content stacked vertically -->
+	<div>
+		<!-- Key Themes -->
+		{% if insight and insight.key_themes %}
+		<div class="mb-4">
+			<h6 class="mb-3 d-flex align-items-center">
+				<span class="me-2">🎯</span>
+				Key Themes
+			</h6>
+			<div class="d-flex flex-wrap gap-2">
+				{% for theme in insight.key_themes %}
+				<span class="badge bg-light text-dark border px-3 py-2">{{ theme }}</span>
+				{% endfor %}
 			</div>
-			{% endif %}
-
-			<!-- Common Questions -->
-			{% if insight and insight.common_questions %}
-			<div class="mb-4">
-				<h6 class="mb-3 d-flex align-items-center">
-					<span class="me-2">❓</span>
-					Common Questions
-				</h6>
-				<ul class="list-unstyled">
-					{% for question in insight.common_questions %}
-					<li class="mb-2 ps-3 border-start border-3 border-info">
-						<small>{{ question }}</small>
-					</li>
-					{% endfor %}
-				</ul>
-			</div>
-			{% endif %}
-
-			<!-- Related Concepts -->
-			{% if insight and insight.related_concepts %}
-			<div class="mb-4">
-				<h6 class="mb-3 d-flex align-items-center">
-					<span class="me-2">🔗</span>
-					Related Concepts
-				</h6>
-				<div class="d-flex flex-wrap gap-2">
-					{% for concept in insight.related_concepts %}
-					<span class="badge bg-secondary px-3 py-2">{{ concept }}</span>
-					{% endfor %}
-				</div>
-			</div>
-			{% endif %}
-
-			<!-- Related Topics -->
-			{% if related_topics %}
-			<div class="mb-4">
-				<h6 class="mb-3 d-flex align-items-center">
-					<span class="me-2">🌐</span>
-					Related Topics
-				</h6>
-				<div class="list-group list-group-flush">
-					{% for rt in related_topics %}
-					<div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-center">
-						<a href="#" onclick="loadTopicById({{ rt.id }}); return false;" class="text-decoration-none flex-grow-1">
-							{{ rt.name }}
-						</a>
-						<span class="badge bg-light text-dark">{{ "%.0f"|format(rt.similarity * 100) }}%</span>
-					</div>
-					{% endfor %}
-				</div>
-			</div>
-			{% endif %}
 		</div>
+		{% endif %}
 
-		<!-- Right Column: Documents -->
-		<div class="col-lg-6">
+		<!-- Common Questions -->
+		{% if insight and insight.common_questions %}
+		<div class="mb-4">
+			<h6 class="mb-3 d-flex align-items-center">
+				<span class="me-2">❓</span>
+				Common Questions
+			</h6>
+			<ul class="list-unstyled">
+				{% for question in insight.common_questions %}
+				<li class="mb-2 ps-3 border-start border-3 border-info">
+					<small>{{ question }}</small>
+				</li>
+				{% endfor %}
+			</ul>
+		</div>
+		{% endif %}
+
+		<!-- Related Concepts -->
+		{% if insight and insight.related_concepts %}
+		<div class="mb-4">
+			<h6 class="mb-3 d-flex align-items-center">
+				<span class="me-2">🔗</span>
+				Related Concepts
+			</h6>
+			<div class="d-flex flex-wrap gap-2">
+				{% for concept in insight.related_concepts %}
+				<span class="badge bg-secondary px-3 py-2">{{ concept }}</span>
+				{% endfor %}
+			</div>
+		</div>
+		{% endif %}
+
+		<!-- Related Topics -->
+		{% if related_topics %}
+		<div class="mb-4">
+			<h6 class="mb-3 d-flex align-items-center">
+				<span class="me-2">🌐</span>
+				Related Topics
+			</h6>
+			<div class="list-group list-group-flush">
+				{% for rt in related_topics %}
+				<div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-center">
+					<a href="#" onclick="loadTopicById({{ rt.id }}); return false;" class="text-decoration-none flex-grow-1">
+						{{ rt.name }}
+					</a>
+					<span class="badge bg-light text-dark">{{ "%.0f"|format(rt.similarity * 100) }}%</span>
+				</div>
+				{% endfor %}
+			</div>
+		</div>
+		{% endif %}
+
+		<!-- Documents (Ranked by Relevance) -->
+		<div class="mb-4">
 			<h6 class="mb-3 d-flex align-items-center">
 				<span class="me-2">📄</span>
 				Documents (Ranked by Relevance)
@@ -195,18 +193,22 @@ async function submitTopicQuestion(event, topicId) {
 		const html = await response.text();
 		answerDiv.innerHTML = html;
 		
-		// Attach click handlers to citations
+		// Ensure citations are clickable - citations.js uses event delegation
+		// but we can verify they're properly set up
 		answerDiv.querySelectorAll('.citation').forEach(citation => {
 			citation.style.cursor = 'pointer';
 			citation.style.color = '#4f46e5';
 			citation.style.textDecoration = 'underline';
-			citation.onclick = function() {
-				const docId = this.getAttribute('data-doc-id');
-				if (docId) {
-					scrollToDocument(docId);
-				}
-			};
+			citation.style.fontWeight = '600';
+			// Add a title attribute for better UX
+			const docId = citation.getAttribute('data-doc-id');
+			const chunkId = citation.getAttribute('data-chunk-id');
+			if (docId) {
+				citation.title = `Click to view document ${docId}${chunkId ? ' (chunk ' + chunkId + ')' : ''}`;
+			}
 		});
+		
+		console.log('Q&A answer inserted, citations ready:', answerDiv.querySelectorAll('.citation').length);
 		
 	} catch (error) {
 		answerDiv.innerHTML = '<div class="alert alert-danger small">Failed to get answer. Please try again.</div>';

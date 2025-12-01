@@ -18,12 +18,10 @@
 				</div>
 				<div class="modal-body">
 					<form 
+						id="create-collection-form"
 						hx-post="/api/collections" 
 						hx-swap="none" 
-						hx-trigger="submit"
-						hx-indicator="#create-loading"
-						onsubmit="event.preventDefault(); return true;"
-						hx-on::afterRequest="handleCollectionCreate(event)">
+						hx-indicator="#create-loading">
 						<div class="mb-2">
 							<label class="form-label">Name</label>
 							<input class="form-control" name="name" required />
@@ -33,8 +31,10 @@
 							<textarea class="form-control" name="description" rows="2"></textarea>
 						</div>
 						<div class="d-flex align-items-center gap-2">
-							<button class="btn btn-primary" type="submit">Create</button>
-							<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status"></div>
+							<button class="btn btn-primary" type="submit" id="create-btn">Create</button>
+							<div id="create-loading" class="spinner-border spinner-border-sm htmx-indicator" role="status">
+								<span class="visually-hidden">Loading...</span>
+							</div>
 						</div>
 					</form>
 				</div>
@@ -49,18 +49,17 @@
 		<div class="card h-100 position-relative">
 			<div class="card-body">
 				<div class="d-flex justify-content-between align-items-start">
-					<a href="/collections/{{ c.id }}" class="text-decoration-none text-reset flex-grow-1">
+					<a href="/collections/{{ c.id }}" class="text-decoration-none text-reset flex-grow-1 collection-link">
 						<div>
 							<h5 class="card-title mb-1">{{ c.name }}</h5>
 							<div class="text-muted small mb-2">{{ c.description or 'No description' }}</div>
 						</div>
 					</a>
-					<button class="btn btn-sm btn-outline-danger ms-2" type="button"
+					<button class="btn btn-sm btn-outline-danger ms-2 delete-collection-btn" type="button"
+						data-collection-id="{{ c.id }}"
 						hx-delete="/api/collections/{{ c.id }}" 
 						hx-confirm="Delete this collection?" 
-						hx-target="closest .col" 
-						hx-swap="outerHTML:remove"
-						onclick="event.stopPropagation();">
+						hx-swap="none">
 						Delete
 					</button>
 				</div>
@@ -73,53 +72,225 @@
 <div class="alert alert-info">No collections yet. Click "New Collection" to get started.</div>
 {% endif %}
 <script>
-function handleCollectionCreate(event) {
-	try {
-		const xhr = event.detail.xhr;
-		if (xhr.status === 201 || xhr.status === 200) {
-			const responseText = xhr.responseText || '';
-			let data = {};
+document.addEventListener('DOMContentLoaded', function() {
+	// Handle collection creation
+	const createForm = document.getElementById('create-collection-form');
+	if (createForm) {
+		createForm.addEventListener('htmx:beforeRequest', function(event) {
+			const btn = document.getElementById('create-btn');
+			const loadingEl = document.getElementById('create-loading');
+			
+			if (btn) {
+				btn.disabled = true;
+				btn.textContent = 'Creating...';
+			}
+			
+			// Ensure loader is visible immediately
+			if (loadingEl) {
+				loadingEl.style.display = 'inline-block';
+				loadingEl.style.opacity = '1';
+			}
+		});
+		
+		createForm.addEventListener('htmx:afterRequest', function(event) {
+			const btn = document.getElementById('create-btn');
+			const loadingEl = document.getElementById('create-loading');
+			
 			try {
-				data = JSON.parse(responseText);
-			} catch (e) {
-				console.error('Failed to parse response:', e);
+				const xhr = event.detail.xhr;
+				if (xhr && (xhr.status === 201 || xhr.status === 200)) {
+					const responseText = xhr.responseText || '';
+					let data = {};
+					try {
+						data = JSON.parse(responseText);
+					} catch (e) {
+						console.error('Failed to parse response:', e);
+					}
+					
+					// Update button to show success state
+					if (btn) {
+						btn.disabled = true;
+						btn.textContent = 'Creating...';
+					}
+					
+					// Ensure loader is visible
+					if (loadingEl) {
+						loadingEl.style.display = 'inline-block';
+					}
+					
+					// Close modal after a brief delay to show the loader
+					setTimeout(function() {
+						const modal = bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));
+						if (modal) {
+							modal.hide();
+						}
+						
+						// Reset form
+						if (createForm) {
+							createForm.reset();
+						}
+						
+						// Reset button state
+						if (btn) {
+							btn.disabled = false;
+							btn.textContent = 'Create';
+						}
+						
+						// Redirect to collection detail after showing loader
+						if (data && data.id) {
+							window.location.href = '/collections/' + data.id;
+						} else {
+							window.location.reload();
+						}
+					}, 800); // 800ms delay to show loader
+				} else if (xhr) {
+					// Reset button on error
+					if (btn) {
+						btn.disabled = false;
+						btn.textContent = 'Create';
+					}
+					
+					// Show error
+					const responseText = xhr.responseText || 'Failed to create collection';
+					let errorMsg = 'Failed to create collection';
+					try {
+						const errorData = JSON.parse(responseText);
+						errorMsg = errorData.error || errorMsg;
+					} catch (e) {
+						errorMsg = responseText;
+					}
+					alert(errorMsg);
+				} else {
+					// Reset button if no response
+					if (btn) {
+						btn.disabled = false;
+						btn.textContent = 'Create';
+					}
+				}
+			} catch (err) {
+				console.error('Error handling collection creation:', err);
+				// Reset button on error
+				if (btn) {
+					btn.disabled = false;
+					btn.textContent = 'Create';
+				}
+				alert('An error occurred while creating the collection');
 			}
-			
-			// Close modal
-			const modal = bootstrap.Modal.getInstance(document.getElementById('newCollectionModal'));
-			if (modal) {
-				modal.hide();
-			}
-			
-			// Reset form
-			const form = document.querySelector('#newCollectionModal form');
-			if (form) {
-				form.reset();
-			}
-			
-			// Redirect to collection detail or refresh
-			if (data && data.id) {
-				window.location.href = '/collections/' + data.id;
-			} else {
-				window.location.reload();
-			}
-		} else {
-			// Show error
-			const responseText = xhr.responseText || 'Failed to create collection';
-			let errorMsg = 'Failed to create collection';
-			try {
-				const errorData = JSON.parse(responseText);
-				errorMsg = errorData.error || errorMsg;
-			} catch (e) {
-				errorMsg = responseText;
-			}
-			alert(errorMsg);
-		}
-	} catch (err) {
-		console.error('Error handling collection creation:', err);
-		alert('An error occurred while creating the collection');
+		});
 	}
-}
+	
+	// Prevent link navigation when clicking delete button
+	// Add click handler directly to each collection link
+	// This prevents navigation without interfering with HTMX
+	document.querySelectorAll('.collection-link').forEach(link => {
+		link.addEventListener('click', function(e) {
+			// If click came from delete button, prevent navigation
+			const deleteBtn = e.target.closest('.delete-collection-btn');
+			if (deleteBtn) {
+				e.preventDefault();
+				// Don't stop propagation - HTMX needs it
+			}
+		});
+	});
+	
+	// Debug: Log HTMX events to see what's happening
+	document.body.addEventListener('htmx:beforeRequest', function(event) {
+		if (event.detail.elt && event.detail.elt.classList.contains('delete-collection-btn')) {
+			console.log('HTMX delete request initiated', event.detail);
+		}
+	});
+	
+	document.body.addEventListener('htmx:afterRequest', function(event) {
+		if (event.detail.elt && event.detail.elt.classList.contains('delete-collection-btn')) {
+			console.log('HTMX delete request completed', event.detail);
+		}
+	});
+	
+	document.body.addEventListener('htmx:sendError', function(event) {
+		if (event.detail.elt && event.detail.elt.classList.contains('delete-collection-btn')) {
+			console.error('HTMX delete request error', event.detail);
+		}
+	});
+	
+	// Log confirmation events
+	document.body.addEventListener('htmx:confirm', function(event) {
+		if (event.detail.elt && event.detail.elt.classList.contains('delete-collection-btn')) {
+			console.log('HTMX confirmation triggered', event.detail);
+		}
+	});
+	
+	// Log when request is actually sent (after confirmation)
+	document.body.addEventListener('htmx:configRequest', function(event) {
+		if (event.detail.elt && event.detail.elt.classList.contains('delete-collection-btn')) {
+			console.log('HTMX request being sent', event.detail);
+		}
+	});
+	
+	// Handle collection deletion
+	document.body.addEventListener('htmx:afterRequest', function(event) {
+		// Check if this is a delete request for a collection
+		const button = event.detail.elt;
+		if (button && button.classList.contains('delete-collection-btn')) {
+			try {
+				const xhr = event.detail.xhr;
+				if (xhr && (xhr.status === 200 || xhr.status === 204)) {
+					// Success - remove the collection card
+					const target = button.closest('.col');
+					if (target) {
+						target.remove();
+					}
+					// If no collections left, show message
+					const collectionsContainer = document.querySelector('.row.row-cols-1');
+					if (collectionsContainer && collectionsContainer.children.length === 0) {
+						collectionsContainer.outerHTML = '<div class="alert alert-info">No collections yet. Click "New Collection" to get started.</div>';
+					} else {
+						// Reload the page to ensure everything is in sync
+						window.location.reload();
+					}
+				} else if (xhr) {
+					// Handle error - show alert with detailed error message
+					const responseText = xhr.responseText || 'Failed to delete collection';
+					let errorMsg = 'Failed to delete collection';
+					try {
+						const errorData = JSON.parse(responseText);
+						errorMsg = errorData.error || errorMsg;
+					} catch (e) {
+						// If not JSON, use the response text (truncated)
+						errorMsg = responseText.substring(0, 200);
+					}
+					alert('Error: ' + errorMsg + '\n\nStatus: ' + xhr.status);
+					console.error('Delete collection error:', {
+						status: xhr.status,
+						statusText: xhr.statusText,
+						response: responseText
+					});
+				}
+			} catch (err) {
+				console.error('Error handling collection deletion:', err);
+				alert('An unexpected error occurred while deleting the collection. Please check the console for details.');
+			}
+		}
+	});
+	
+	// Also handle HTMX errors specifically
+	document.body.addEventListener('htmx:responseError', function(event) {
+		const button = event.detail.elt;
+		if (button && button.classList.contains('delete-collection-btn')) {
+			console.error('HTMX response error for delete:', event.detail);
+			const xhr = event.detail.xhr;
+			if (xhr) {
+				let errorMsg = 'Failed to delete collection';
+				try {
+					const errorData = JSON.parse(xhr.responseText || '{}');
+					errorMsg = errorData.error || errorMsg;
+				} catch (e) {
+					errorMsg = xhr.responseText || errorMsg;
+				}
+				alert('Error deleting collection: ' + errorMsg);
+			}
+		}
+	});
+});
 </script>
 {% endblock %}
 

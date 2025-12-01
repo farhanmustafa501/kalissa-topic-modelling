@@ -6,7 +6,6 @@ Chunks are sized at 800-1200 tokens with 100-200 token overlap to maintain conte
 """
 
 import logging
-from typing import List
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -32,12 +31,12 @@ def create_text_splitter(chunk_size: int = None, chunk_overlap: int = None) -> R
 		chunk_size = DEFAULT_CHUNK_SIZE
 	if chunk_overlap is None:
 		chunk_overlap = DEFAULT_CHUNK_OVERLAP
-	
+
 	logger.debug(
 		"Creating text splitter",
 		extra={"chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
 	)
-	
+
 	return RecursiveCharacterTextSplitter(
 		chunk_size=chunk_size,
 		chunk_overlap=chunk_overlap,
@@ -46,7 +45,7 @@ def create_text_splitter(chunk_size: int = None, chunk_overlap: int = None) -> R
 	)
 
 
-def split_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> List[str]:
+def split_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> list[str]:
 	"""
 	Split text into chunks using RecursiveCharacterTextSplitter.
 	
@@ -64,10 +63,10 @@ def split_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> 
 	if not text or not text.strip():
 		logger.warning("Attempted to split empty text")
 		return []
-	
+
 	splitter = create_text_splitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 	chunks = splitter.split_text(text)
-	
+
 	logger.info(
 		"Text split into chunks",
 		extra={
@@ -76,6 +75,7 @@ def split_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> 
 			"avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0
 		}
 	)
-	
+
 	return chunks
+
 

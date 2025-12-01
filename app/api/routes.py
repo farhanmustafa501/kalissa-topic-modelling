@@ -1,16 +1,26 @@
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for
-import os
 import logging
-from threading import Thread
+import os
 from datetime import datetime
-from sqlalchemy import select, func
+
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import SessionLocal, ensure_tables_initialized
-from app.models import Collection, Document, Chunk, Topic, TopicRelationship, DiscoveryJob, JobStatusEnum, TopicInsight, DocumentTopic
-from app.services.parser import extract_text_from_upload
-from app.services.discovery import run_discovery
+from app.models import (
+	Chunk,
+	Collection,
+	DiscoveryJob,
+	Document,
+	DocumentTopic,
+	JobStatusEnum,
+	Topic,
+	TopicInsight,
+	TopicRelationship,
+)
 from app.services.ai import answer_question_with_citations
+from app.services.parser import extract_text_from_upload
+from app.tasks import run_discovery_task
 
 api_bp = Blueprint("api", __name__)
 ui_bp = Blueprint("ui", __name__)
@@ -42,58 +52,12 @@ def index():
 		session.close()
 
 
-def _run_discovery_async(job_id: int, collection_id: int) -> None:
-	"""
-	Background thread entry: run discovery and update job row.
-	
-	This function runs in a separate thread to avoid blocking the HTTP request.
-	It handles the complete topic discovery pipeline.
-	"""
-	session = SessionLocal()
-	try:
-		job = session.get(DiscoveryJob, job_id)
-		if not job:
-			logger.warning("Discovery job not found", extra={"job_id": job_id})
-			return
-		
-		logger.info("Discovery thread started", extra={"collection_id": collection_id, "job_id": job_id})
-		
-		# Run the discovery pipeline
-		run_discovery(session, collection_id, job)
-		
-		# Mark job as finished (if not already marked by run_discovery)
-		job = session.get(DiscoveryJob, job_id)
-		if job and job.status == JobStatusEnum.RUNNING:
-			job.finished_at = datetime.utcnow()
-			if job.status != JobStatusEnum.SUCCEEDED and job.status != JobStatusEnum.FAILED:
-				job.status = JobStatusEnum.SUCCEEDED
-			session.add(job)
-			session.commit()
-		
-		logger.info("Discovery thread completed", extra={"collection_id": collection_id, "job_id": job_id, "status": job.status if job else "unknown"})
-	except Exception as e:
-		logger.exception("Discovery thread failed", extra={"collection_id": collection_id, "job_id": job_id, "error": str(e)})
-		try:
-			j = session.get(DiscoveryJob, job_id)
-			if j:
-				j.status = JobStatusEnum.FAILED
-				j.error_message = str(e)[:500] if str(e) else "Unhandled error"
-				j.finished_at = datetime.utcnow()
-				session.add(j)
-				session.commit()
-				logger.info("Job failure persisted", extra={"job_id": job_id})
-		except Exception as inner_e:
-			logger.exception("Failed to persist job failure", extra={"job_id": job_id, "inner_error": str(inner_e)})
-	finally:
-		session.close()
-
-
 @api_bp.post("/collections/<int:collection_id>/discover")
 def discover_collection(collection_id: int):
 	"""
 	Start topic discovery job for a collection.
 	
-	Creates a discovery job and runs it in a background thread.
+	Creates a discovery job and runs it as a Celery background task.
 	The pipeline includes: chunking, embedding, clustering, topic labeling, and relationship building.
 	"""
 	logger.info("discover_collection start", extra={"collection_id": collection_id})
@@ -104,7 +68,7 @@ def discover_collection(collection_id: int):
 		c = session.get(Collection, collection_id)
 		if not c:
 			return jsonify({"error": "Collection not found"}), 404
-		
+
 		# Create job with correct total steps (10 steps in the pipeline)
 		job = DiscoveryJob(
 			collection_id=collection_id,
@@ -119,14 +83,14 @@ def discover_collection(collection_id: int):
 		c.last_discovery_job_id = job.id
 		session.commit()
 
-		# Start discovery in background thread
-		Thread(target=_run_discovery_async, args=(job.id, collection_id), daemon=True).start()
+		# Start discovery as Celery task
+		run_discovery_task.delay(job.id, collection_id)
 		logger.info("Discovery job enqueued", extra={"collection_id": collection_id, "job_id": job.id})
 		return jsonify({"job_id": job.id, "collection_id": collection_id, "status": "ENQUEUED"})
 	except Exception as e:
-		logger.exception("failed to start discovery thread", extra={"collection_id": collection_id, "error": str(e)})
+		logger.exception("failed to enqueue discovery task", extra={"collection_id": collection_id, "error": str(e)})
 		session.rollback()
-		return jsonify({"error": f"failed to start discovery: {str(e)}"}), 500
+		return jsonify({"error": f"failed to start discovery: {e!s}"}), 500
 	finally:
 		session.close()
 
@@ -160,14 +124,46 @@ def delete_last_discovery_job(collection_id: int):
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
+		# Get the collection first
+		collection = session.get(Collection, collection_id)
+		if not collection:
+			return jsonify({"error": "Collection not found"}), 404
+
+		# Get the last discovery job for this collection
 		row = session.scalars(select(DiscoveryJob).where(DiscoveryJob.collection_id == collection_id).order_by(DiscoveryJob.id.desc())).first()
 		if not row:
 			return jsonify({"status": "no_job"}), 404
+
+		job_id = row.id
+
+		# IMPORTANT: Clear the reference in ALL collections that reference this job
+		# (not just the current collection, in case there's a data inconsistency)
+		collections_with_job = session.scalars(
+			select(Collection).where(Collection.last_discovery_job_id == job_id)
+		).all()
+
+		if collections_with_job:
+			logger.info("Clearing job reference from collections", extra={"job_id": job_id, "num_collections": len(collections_with_job)})
+			for coll in collections_with_job:
+				coll.last_discovery_job_id = None
+				session.add(coll)
+
+			# Commit the changes to clear references BEFORE deleting the job
+			session.commit()
+			logger.info("Job references cleared from collections", extra={"job_id": job_id})
+
+		# Refresh the job row to ensure we have the latest state
+		session.refresh(row)
+
+		# Now delete the job
 		session.delete(row)
 		session.commit()
-		return jsonify({"status": "deleted", "job_id": row.id})
+
+		logger.info("Discovery job deleted", extra={"collection_id": collection_id, "job_id": job_id, "collections_cleared": len(collections_with_job)})
+		return jsonify({"status": "deleted", "job_id": job_id})
 	except SQLAlchemyError as e:
 		session.rollback()
+		logger.exception("Failed to delete discovery job", extra={"collection_id": collection_id, "error": str(e)})
 		return jsonify({"error": str(e)}), 500
 	finally:
 		session.close()
@@ -307,7 +303,7 @@ def list_documents_in_collection(collection_id: int):
 			.where(Document.collection_id == collection_id)
 			.order_by(Document.created_at.desc())
 		).all()
-		
+
 		# Count chunks per document
 		doc_ids = [d.id for d in rows]
 		chunk_counts = {}
@@ -318,7 +314,7 @@ def list_documents_in_collection(collection_id: int):
 				.group_by(Chunk.document_id)
 			).all()
 			chunk_counts = {stat.document_id: stat.chunk_count for stat in chunk_stats}
-		
+
 		resp = [
 			{
 				"id": d.id,
@@ -437,10 +433,10 @@ def topic_qa(topic_id: int):
 	Uses top 10 chunks from documents in the topic for context.
 	"""
 	question = (request.get_json(silent=True) or {}).get("question") or request.form.get("question") or ""
-	
+
 	if not question or not question.strip():
 		return '<div class="qa-answer">Please provide a question.</div>'
-	
+
 	logger.info("Topic Q&A request", extra={"topic_id": topic_id, "question_length": len(question)})
 	ensure_tables_initialized()
 	session = SessionLocal()
@@ -452,10 +448,10 @@ def topic_qa(topic_id: int):
 			.where(DocumentTopic.topic_id == topic_id)
 			.order_by(DocumentTopic.relevance_score.desc())
 		).all()
-		
+
 		if not doc_rows:
 			return '<div class="qa-answer">No documents found for this topic.</div>'
-		
+
 		# Get chunks from these documents, ordered by relevance
 		doc_ids = [r.Document.id for r in doc_rows]
 		chunks = session.scalars(
@@ -465,10 +461,10 @@ def topic_qa(topic_id: int):
 			.order_by(Chunk.document_id, Chunk.chunk_index)
 			.limit(10)  # Top 10 chunks
 		).all()
-		
+
 		if not chunks:
 			return '<div class="qa-answer">No relevant chunks found for this topic.</div>'
-		
+
 		# Build context chunks with proper IDs (format: D{doc_id}-C{chunk_index})
 		context_chunks = []
 		for chunk in chunks:
@@ -481,9 +477,9 @@ def topic_qa(topic_id: int):
 					"document_id": chunk.document_id,
 					"title": doc.title,
 				})
-		
+
 		logger.debug("Q&A context prepared", extra={"num_chunks": len(context_chunks)})
-		
+
 		# Generate answer with citations
 		html = answer_question_with_citations(question, context_chunks)
 		return html
@@ -516,6 +512,19 @@ def ui_topic(topic_id: int):
 			.where(DocumentTopic.topic_id == topic_id)
 			.order_by(DocumentTopic.relevance_score.desc())
 		).all()
+		# Load chunks for each document
+		doc_ids = [row.Document.id for row in docs]
+		chunks_by_doc = {}
+		if doc_ids:
+			chunks = session.scalars(
+				select(Chunk)
+				.where(Chunk.document_id.in_(doc_ids))
+				.order_by(Chunk.document_id, Chunk.chunk_index)
+			).all()
+			for chunk in chunks:
+				if chunk.document_id not in chunks_by_doc:
+					chunks_by_doc[chunk.document_id] = []
+				chunks_by_doc[chunk.document_id].append(chunk)
 		# Related topics via relationships
 		rel_rows = session.scalars(
 			select(TopicRelationship).where(
@@ -529,7 +538,7 @@ def ui_topic(topic_id: int):
 			if other:
 				related.append({"id": other.id, "name": other.name, "similarity": r.similarity_score or 0.0})
 		related.sort(key=lambda x: x["similarity"], reverse=True)
-		return render_template("topic_detail.html", topic=t, insight=ins, ranked_docs=docs, related_topics=related)
+		return render_template("topic_detail.html", topic=t, insight=ins, ranked_docs=docs, related_topics=related, chunks_by_doc=chunks_by_doc)
 	finally:
 		session.close()
 
@@ -552,6 +561,80 @@ def ui_discover_status(collection_id: int):
 			status = {"status": row.status, "step": row.progress_step or 0, "total": row.progress_total_steps or 0, "label": label}
 			job_id = row.id
 		return render_template("partials/job_status.html", collection_id=collection_id, status=status, job_id=job_id)
+	finally:
+		session.close()
+
+
+@api_bp.get("/documents/<int:document_id>/citation")
+def get_document_citation(document_id: int):
+	"""
+	Get document content and specific chunk information for citation modal.
+	
+	Query params:
+	- chunk_id: Optional chunk ID in format "D{doc_id}-C{chunk_index}" (e.g., "D1-C3")
+	"""
+	ensure_tables_initialized()
+	session = SessionLocal()
+	try:
+		doc = session.get(Document, document_id)
+		if not doc:
+			return jsonify({"error": "Document not found"}), 404
+		
+		chunk_id = request.args.get("chunk_id")
+		chunk_index = None
+		chunk_text = None
+		
+		if chunk_id:
+			# Parse chunk_id format: "D{doc_id}-C{chunk_index}"
+			try:
+				if chunk_id.startswith("D") and "-C" in chunk_id:
+					parts = chunk_id.split("-C")
+					if len(parts) == 2:
+						parsed_doc_id = int(parts[0][1:])
+						chunk_index = int(parts[1])
+						if parsed_doc_id != document_id:
+							return jsonify({"error": "Chunk ID does not match document ID"}), 400
+						
+						# Get the specific chunk
+						chunk = session.scalars(
+							select(Chunk)
+							.where(Chunk.document_id == document_id)
+							.where(Chunk.chunk_index == chunk_index)
+						).first()
+						
+						if chunk:
+							chunk_text = chunk.text
+			except (ValueError, IndexError):
+				# Invalid chunk_id format, ignore it
+				pass
+		
+		# Get all chunks for this document to show context
+		all_chunks = session.scalars(
+			select(Chunk)
+			.where(Chunk.document_id == document_id)
+			.order_by(Chunk.chunk_index)
+		).all()
+		
+		chunks_data = [
+			{
+				"chunk_index": c.chunk_index,
+				"text": c.text,
+				"is_highlighted": (c.chunk_index == chunk_index) if chunk_index is not None else False
+			}
+			for c in all_chunks
+		]
+		
+		return jsonify({
+			"document_id": doc.id,
+			"title": doc.title,
+			"content": doc.content or "",
+			"chunk_index": chunk_index,
+			"chunk_text": chunk_text,
+			"chunks": chunks_data
+		})
+	except Exception as e:
+		logger.exception("Failed to get document citation", extra={"document_id": document_id, "error": str(e)})
+		return jsonify({"error": str(e)}), 500
 	finally:
 		session.close()
 
@@ -627,20 +710,42 @@ def get_collection(collection_id: int):
 
 @api_bp.delete("/collections/<int:collection_id>")
 def delete_collection(collection_id: int):
+	"""
+	Delete a collection and all its related data.
+	
+	This will cascade delete:
+	- Documents (and their chunks)
+	- Topics (and their relationships, insights)
+	- Discovery jobs
+	"""
 	ensure_tables_initialized()
 	session = SessionLocal()
 	try:
 		c = session.get(Collection, collection_id)
 		if not c:
 			return jsonify({"error": "not found"}), 404
+
+		# Clear the last_discovery_job_id reference before deletion
+		# This prevents foreign key constraint issues
+		if c.last_discovery_job_id:
+			c.last_discovery_job_id = None
+			session.add(c)
+			session.flush()  # Flush to clear the reference
+
+		# Delete the collection (cascade will handle related records)
 		session.delete(c)
 		session.commit()
+
 		logger.info("delete_collection", extra={"collection_id": collection_id})
 		return jsonify({"status": "deleted", "id": collection_id})
 	except SQLAlchemyError as e:
 		session.rollback()
-		logger.exception("delete_collection db error")
-		return jsonify({"error": str(e)}), 500
+		logger.exception("delete_collection db error", extra={"collection_id": collection_id, "error": str(e)})
+		return jsonify({"error": "Failed to delete collection: " + str(e)}), 500
+	except Exception as e:
+		session.rollback()
+		logger.exception("delete_collection unexpected error", extra={"collection_id": collection_id, "error": str(e)})
+		return jsonify({"error": "Unexpected error: " + str(e)}), 500
 	finally:
 		session.close()
 

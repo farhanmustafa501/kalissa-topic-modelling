@@ -2,3 +2,4 @@
 .env
 /app/__pycache__
 /app/services/__pycache__
+/tests/__pycache__

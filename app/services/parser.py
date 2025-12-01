@@ -8,9 +8,8 @@ Uses pdfplumber for PDF parsing as recommended for better text extraction.
 from __future__ import annotations
 
 import io
-import os
 import logging
-from typing import Tuple
+import os
 
 import pdfplumber
 from docx import Document as DocxDocument
@@ -38,7 +37,7 @@ def _safe_decode(data: bytes) -> str:
 			return ""
 
 
-def extract_text_from_upload(filename: str, file_bytes: bytes) -> Tuple[str, str]:
+def extract_text_from_upload(filename: str, file_bytes: bytes) -> tuple[str, str]:
 	"""
 	Extract text content from uploaded file bytes.
 	
@@ -54,8 +53,14 @@ def extract_text_from_upload(filename: str, file_bytes: bytes) -> Tuple[str, str
 		- title: Basename of the file
 		- text: Extracted text content
 	"""
-	title = os.path.basename(filename or "").strip() or "Untitled"
-	lower = title.lower()
+	# Extract title from filename (remove extension)
+	full_name = os.path.basename(filename or "").strip() or "Untitled"
+	# Remove file extension for cleaner title
+	if "." in full_name:
+		title = os.path.splitext(full_name)[0]
+	else:
+		title = full_name
+	lower = full_name.lower()
 	logger.info(
 		"Extracting text from uploaded file",
 		extra={"upload_filename": title, "file_size_bytes": len(file_bytes), "extension": lower.split(".")[-1] if "." in lower else "unknown"}

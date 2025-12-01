@@ -6,19 +6,19 @@ This module uses OpenAI's GPT models:
 - GPT-4o: For Q&A with citations (higher quality)
 """
 
-import os
 import json
-import re
 import logging
-from typing import List, Dict, Any, Optional
+import os
+import re
+from typing import Any
 
-from openai import OpenAI
 import httpx
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 
-def _get_client() -> Optional[OpenAI]:
+def _get_client() -> OpenAI | None:
 	"""
 	Get configured OpenAI client.
 	
@@ -38,7 +38,7 @@ def _get_client() -> Optional[OpenAI]:
 		return None
 
 
-def generate_topic_name(representative_chunks: List[str]) -> Dict[str, Any]:
+def generate_topic_name(representative_chunks: list[str]) -> dict[str, Any]:
 	"""
 	Generate topic name, summary, and keywords using GPT-4o-mini.
 	
@@ -61,16 +61,16 @@ def generate_topic_name(representative_chunks: List[str]) -> Dict[str, Any]:
 			"summary": first_chunk[:200] if first_chunk else "No summary available",
 			"keywords": words[:5] if words else []
 		}
-	
+
 	# Build prompt with representative chunks
 	chunk_texts = "\n\n".join(
-		f"<CHUNK_{i+1}>\n{chunk[:1500]}" 
+		f"<CHUNK_{i+1}>\n{chunk[:1500]}"
 		for i, chunk in enumerate(representative_chunks[:5])
 	)
-	
+
 	system_prompt = """You are assigning a name to a topic derived from clustering text documents.
 Analyze the representative text samples and return a concise, descriptive topic name."""
-	
+
 	user_prompt = f"""You are assigning a name to a topic derived from clustering text documents.
 
 Here are representative samples:
@@ -83,7 +83,7 @@ Return concise JSON:
   "summary": "One-sentence description",
   "keywords": ["keyword1", "keyword2", "keyword3"]
 }}"""
-	
+
 	try:
 		logger.debug("Generating topic name with GPT-4o-mini", extra={"num_chunks": len(representative_chunks)})
 		resp = client.chat.completions.create(
@@ -97,7 +97,7 @@ Return concise JSON:
 		)
 		content = resp.choices[0].message.content or "{}"
 		data = json.loads(content)
-		
+
 		result = {
 			"name": (data.get("name") or "Topic")[:255],  # Match DB column limit
 			"summary": (data.get("summary") or "")[:600],
@@ -117,7 +117,7 @@ Return concise JSON:
 		}
 
 
-def generate_topic_insights(representative_chunks: List[str], topic_name: str) -> Dict[str, Any]:
+def generate_topic_insights(representative_chunks: list[str], topic_name: str) -> dict[str, Any]:
 	"""
 	Generate topic insights using GPT-4o-mini.
 	
@@ -140,15 +140,15 @@ def generate_topic_insights(representative_chunks: List[str], topic_name: str) -
 			"questions": [f"What is {topic_name}?"] if topic_name else [],
 			"related_concepts": []
 		}
-	
+
 	# Build prompt with representative chunks
 	chunk_texts = "\n\n".join(
-		f"<text{i+1}>\n{chunk[:1500]}" 
+		f"<text{i+1}>\n{chunk[:1500]}"
 		for i, chunk in enumerate(representative_chunks[:5])
 	)
-	
+
 	system_prompt = """You are a helpful research assistant. Generate insights about topics derived from document clustering."""
-	
+
 	user_prompt = f"""Generate insights about this topic.
 
 Topic: {topic_name}
@@ -163,7 +163,7 @@ Return JSON:
   "questions": ["question1", "question2", "question3"],
   "related_concepts": ["concept1", "concept2", "concept3"]
 }}"""
-	
+
 	try:
 		logger.debug("Generating topic insights with GPT-4o-mini", extra={"topic_name": topic_name, "num_chunks": len(representative_chunks)})
 		resp = client.chat.completions.create(
@@ -177,7 +177,7 @@ Return JSON:
 		)
 		content = resp.choices[0].message.content or "{}"
 		data = json.loads(content)
-		
+
 		result = {
 			"summary": (data.get("summary") or "")[:600],
 			"themes": list((data.get("themes") or [])[:5]),
@@ -197,7 +197,7 @@ Return JSON:
 		}
 
 
-def answer_question_with_citations(question: str, chunks: List[Dict[str, str]]) -> str:
+def answer_question_with_citations(question: str, chunks: list[dict[str, str]]) -> str:
 	"""
 	Answer a question using RAG with GPT-4o, including inline citations.
 	
@@ -214,23 +214,23 @@ def answer_question_with_citations(question: str, chunks: List[Dict[str, str]]) 
 	"""
 	if not question or not question.strip():
 		return '<div class="qa-answer">Please provide a question.</div>'
-	
+
 	if not chunks:
 		return '<div class="qa-answer">No relevant context found to answer this question.</div>'
-	
+
 	client = _get_client()
 	if not client:
 		return '<div class="qa-answer">AI service unavailable. Please configure OPENAI_API_KEY.</div>'
-	
+
 	# Build context with chunk IDs
 	context_items = []
 	for chunk in chunks[:10]:  # Top 10 chunks
 		chunk_id = chunk.get("id", "UNKNOWN")
 		chunk_text = chunk.get("text", chunk.get("content", ""))[:1000]
 		context_items.append(f"[ID: {chunk_id}] {chunk_text}")
-	
+
 	context_text = "\n\n".join(context_items)
-	
+
 	system_prompt = """You answer using ONLY the provided chunks.
 Every chunk has an ID like [D2-C7].
 
@@ -238,13 +238,13 @@ If you use information from a chunk, cite it inline like:
 "...text..." [D2-C7].
 
 Be accurate and only cite chunks that actually contain the relevant information."""
-	
+
 	user_prompt = f"""Question:
 {question}
 
 Context:
 {context_text}"""
-	
+
 	try:
 		logger.debug("Generating Q&A answer with GPT-4o", extra={"question_length": len(question), "num_chunks": len(chunks)})
 		resp = client.chat.completions.create(
@@ -260,18 +260,18 @@ Context:
 	except Exception as e:
 		logger.exception("Failed to generate Q&A answer", extra={"error": str(e)})
 		raw_answer = "Unable to generate an AI answer at this time."
-	
+
 	# Convert [D2-C7] style citations to clickable spans
 	# Map chunk IDs to document IDs for highlighting
 	chunk_id_to_doc_id = {chunk.get("id"): str(chunk.get("document_id", "")) for chunk in chunks}
-	
+
 	def replace_cite(match):
 		chunk_id = match.group(1)
 		doc_id = chunk_id_to_doc_id.get(chunk_id, "")
 		if doc_id:
 			return f'<span class="citation" data-doc-id="{doc_id}" data-chunk-id="{chunk_id}">[{chunk_id}]</span>'
 		return match.group(0)
-	
+
 	# Pattern matches [ID: D1-C3] or [D1-C3] formats
 	html_answer = re.sub(r"\[(?:ID:\s*)?([D\d]+-C\d+)\]", replace_cite, raw_answer)
 	return f'<div class="qa-answer">{html_answer}</div>'

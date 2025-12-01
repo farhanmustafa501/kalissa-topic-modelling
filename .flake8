@@ -1,0 +1,23 @@
+# Flake8 configuration (for compatibility)
+# Note: This project primarily uses Ruff, but flake8 config is provided for compatibility
+
+[flake8]
+max-line-length = 120
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    .pytest_cache,
+    migrations,
+    htmlcov,
+    build,
+    dist
+ignore =
+    E501,  # line too long (handled by formatter)
+    W503,  # line break before binary operator
+    E203,  # whitespace before ':'
+per-file-ignores =
+    tests/*:S101  # use of assert in tests
+

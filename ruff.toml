@@ -1,0 +1,95 @@
+# Ruff configuration
+# See https://docs.astral.sh/ruff/configuration/
+
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".pytest_cache",
+    "migrations",
+    "htmlcov",
+    "build",
+    "dist",
+]
+
+[lint]
+# Enable specific rule sets
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate (commented out code)
+    "PD",  # pandas-vet
+    "PL",  # Pylint
+    "TRY", # tryceratops
+    "RUF", # Ruff-specific rules
+]
+
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "PLR0913", # too many arguments
+    "PLR2004", # magic value used in comparison
+    "TRY003", # avoid specifying long messages outside exception class
+    "W191",  # indentation contains tabs (will be fixed by formatter)
+    "W293",  # blank line contains whitespace (will be fixed by formatter)
+    "ERA001", # found commented-out code (false positives for docstrings/comments)
+    # Test-related ignores
+    "ARG002", # unused method arguments in tests (pytest fixtures)
+    "ARG001", # unused function argument (self in Celery tasks is required)
+    # Code style suggestions (optional improvements)
+    "SIM117", # nested with statements (readability preference)
+    "SIM105", # try-except-pass (contextlib.suppress is optional)
+    "SIM108", # ternary operator (readability preference)
+    "TRY300", # move return to else block (readability preference)
+    "PLR1714", # merge comparisons (readability preference)
+    "E712", # equality to True/False (assert statements are OK)
+    "TRY002", # create custom exception (generic Exception is OK in tests)
+    # Type checking (optional)
+    "TCH001", # move imports to type-checking block (optional optimization)
+    "TCH003", # move imports to type-checking block (optional optimization)
+    "RUF013", # implicit Optional (backward compatible)
+    # Complexity warnings (acceptable for complex functions)
+    "PLR0912", # too many branches (discovery function is complex by design)
+    "PLR0915", # too many statements (discovery function is complex by design)
+    # Path handling (os.path is acceptable)
+    "PTH119", # use Path.name (os.path.basename is fine)
+    "PTH122", # use Path methods (os.path.splitext is fine)
+    # Other
+    "PLW0603", # global statement (acceptable for initialization flag)
+    "C401", # set comprehension (generator is fine)
+    "F841", # unused variable (model variable may be used later)
+    "RUF001", # ambiguous dash character (intentional in docstrings)
+    "E101", # mixed spaces/tabs (should be fixed by formatter)
+]
+
+[lint.per-file-ignores]
+"tests/*" = [
+    "PLR2004", # magic values in tests are OK
+    "S101",    # use of assert in tests
+    "ARG001",  # unused function arguments in fixtures
+    "ARG002",  # unused method arguments in tests (pytest fixtures)
+    "SIM117",  # nested with statements (readability preference)
+    "SIM105",  # try-except-pass (contextlib.suppress is optional)
+    "E712",    # equality to True/False (assert statements are OK)
+    "TRY002",  # create custom exception (generic Exception is OK in tests)
+]
+
+[lint.isort]
+known-first-party = ["app"]
+
+[lint.mccabe]
+max-complexity = 10
+

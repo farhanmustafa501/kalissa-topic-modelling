@@ -1,6 +1,7 @@
-from flask import Flask
 import logging
 import os
+
+from flask import Flask
 
 from .config import get_config
 from .db import Base, engine
