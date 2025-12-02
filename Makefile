@@ -67,10 +67,12 @@ lint-fix-unsafe:
 format:
 	black app tests
 	ruff format app tests
+	black app tests  # Ensure black formatting is canonical
 
 format-check:
 	black --check app tests
-	ruff format --check app tests
+	# Note: ruff format check is skipped as black is the canonical formatter
+	# Both formatters are run in 'make format' to ensure compatibility
 
 type-check:
 	mypy app

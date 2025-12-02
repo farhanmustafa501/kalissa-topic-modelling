@@ -1,6 +1,7 @@
 """
 Tests for chunking service.
 """
+
 import pytest
 
 from app.services.chunking import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE, create_text_splitter, split_text
@@ -67,4 +68,3 @@ class TestChunking:
         reconstructed = "".join(chunks)
         # Due to overlap, we can't do exact comparison, but check length is reasonable
         assert len(reconstructed) >= len(text) * 0.8  # Allow for some variance
-

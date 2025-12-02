@@ -17,65 +17,60 @@ DEFAULT_CHUNK_OVERLAP = 150  # ~100-200 tokens overlap
 
 
 def create_text_splitter(chunk_size: int = None, chunk_overlap: int = None) -> RecursiveCharacterTextSplitter:
-	"""
-	Create a RecursiveCharacterTextSplitter with configured parameters.
-	
-	Args:
-		chunk_size: Maximum size of each chunk in characters (default: 1200)
-		chunk_overlap: Overlap between chunks in characters (default: 150)
-		
-	Returns:
-		Configured RecursiveCharacterTextSplitter instance
-	"""
-	if chunk_size is None:
-		chunk_size = DEFAULT_CHUNK_SIZE
-	if chunk_overlap is None:
-		chunk_overlap = DEFAULT_CHUNK_OVERLAP
+    """
+    Create a RecursiveCharacterTextSplitter with configured parameters.
 
-	logger.debug(
-		"Creating text splitter",
-		extra={"chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
-	)
+    Args:
+            chunk_size: Maximum size of each chunk in characters (default: 1200)
+            chunk_overlap: Overlap between chunks in characters (default: 150)
 
-	return RecursiveCharacterTextSplitter(
-		chunk_size=chunk_size,
-		chunk_overlap=chunk_overlap,
-		length_function=len,
-		is_separator_regex=False,
-	)
+    Returns:
+            Configured RecursiveCharacterTextSplitter instance
+    """
+    if chunk_size is None:
+        chunk_size = DEFAULT_CHUNK_SIZE
+    if chunk_overlap is None:
+        chunk_overlap = DEFAULT_CHUNK_OVERLAP
+
+    logger.debug("Creating text splitter", extra={"chunk_size": chunk_size, "chunk_overlap": chunk_overlap})
+
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        is_separator_regex=False,
+    )
 
 
 def split_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> list[str]:
-	"""
-	Split text into chunks using RecursiveCharacterTextSplitter.
-	
-	This function takes a document's text content and splits it into smaller chunks
-	that are suitable for embedding. Each chunk is identified with a format like "D1-C1", "D1-C2".
-	
-	Args:
-		text: The full text content to split
-		chunk_size: Maximum size of each chunk in characters (default: 1200)
-		chunk_overlap: Overlap between chunks in characters (default: 150)
-		
-	Returns:
-		List of text chunks
-	"""
-	if not text or not text.strip():
-		logger.warning("Attempted to split empty text")
-		return []
+    """
+    Split text into chunks using RecursiveCharacterTextSplitter.
 
-	splitter = create_text_splitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-	chunks = splitter.split_text(text)
+    This function takes a document's text content and splits it into smaller chunks
+    that are suitable for embedding. Each chunk is identified with a format like "D1-C1", "D1-C2".
 
-	logger.info(
-		"Text split into chunks",
-		extra={
-			"original_length": len(text),
-			"num_chunks": len(chunks),
-			"avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0
-		}
-	)
+    Args:
+            text: The full text content to split
+            chunk_size: Maximum size of each chunk in characters (default: 1200)
+            chunk_overlap: Overlap between chunks in characters (default: 150)
 
-	return chunks
+    Returns:
+            List of text chunks
+    """
+    if not text or not text.strip():
+        logger.warning("Attempted to split empty text")
+        return []
 
+    splitter = create_text_splitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = splitter.split_text(text)
 
+    logger.info(
+        "Text split into chunks",
+        extra={
+            "original_length": len(text),
+            "num_chunks": len(chunks),
+            "avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0,
+        },
+    )
+
+    return chunks

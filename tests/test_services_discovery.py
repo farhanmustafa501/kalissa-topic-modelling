@@ -1,6 +1,7 @@
 """
 Tests for discovery service.
 """
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -21,12 +22,7 @@ class TestDiscovery:
     def test_update_job(self, db_session, sample_discovery_job):
         """Test updating job progress."""
         _update_job(
-            db_session,
-            sample_discovery_job,
-            step=5,
-            total=10,
-            label="Processing",
-            status=JobStatusEnum.RUNNING
+            db_session, sample_discovery_job, step=5, total=10, label="Processing", status=JobStatusEnum.RUNNING
         )
         db_session.refresh(sample_discovery_job)
         assert sample_discovery_job.progress_step == 5
@@ -74,10 +70,10 @@ class TestDiscovery:
         relevance = _compute_doc_relevance([], centroid)
         assert relevance == 0.0
 
-    @patch('app.services.discovery.split_text')
-    @patch('app.services.discovery.get_embeddings_batch')
-    @patch('app.services.discovery.generate_topic_name')
-    @patch('app.services.discovery.generate_topic_insights')
+    @patch("app.services.discovery.split_text")
+    @patch("app.services.discovery.get_embeddings_batch")
+    @patch("app.services.discovery.generate_topic_name")
+    @patch("app.services.discovery.generate_topic_insights")
     def test_run_discovery_basic(
         self,
         mock_insights,
@@ -87,7 +83,7 @@ class TestDiscovery:
         db_session,
         sample_collection,
         sample_document,
-        sample_discovery_job
+        sample_discovery_job,
     ):
         """Test basic discovery pipeline."""
         # Mock chunking
@@ -96,20 +92,16 @@ class TestDiscovery:
         # Mock embeddings
         mock_embeddings.return_value = [
             np.array([0.1] * 1536, dtype=np.float32),
-            np.array([0.2] * 1536, dtype=np.float32)
+            np.array([0.2] * 1536, dtype=np.float32),
         ]
 
         # Mock AI responses
-        mock_name.return_value = {
-            "name": "Test Topic",
-            "summary": "Test summary",
-            "keywords": ["test"]
-        }
+        mock_name.return_value = {"name": "Test Topic", "summary": "Test summary", "keywords": ["test"]}
         mock_insights.return_value = {
             "summary": "Test insights",
             "themes": ["theme1"],
             "questions": ["q1"],
-            "related_concepts": ["concept1"]
+            "related_concepts": ["concept1"],
         }
 
         # This is a complex integration test - we'll test the main flow
@@ -126,12 +118,7 @@ class TestDiscovery:
             run_discovery(db_session, sample_collection.id, sample_discovery_job)
             # If it runs, check that job status was updated
             db_session.refresh(sample_discovery_job)
-            assert sample_discovery_job.status in [
-                JobStatusEnum.SUCCEEDED,
-                JobStatusEnum.FAILED,
-                JobStatusEnum.RUNNING
-            ]
+            assert sample_discovery_job.status in [JobStatusEnum.SUCCEEDED, JobStatusEnum.FAILED, JobStatusEnum.RUNNING]
         except Exception as e:
             # Expected in test environment without full setup
             assert isinstance(e, Exception)
-

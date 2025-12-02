@@ -8,14 +8,14 @@ from sqlalchemy.orm import DeclarativeBase, scoped_session, sessionmaker
 
 
 class Base(DeclarativeBase):
-	pass
+    pass
 
 
 def _get_database_url() -> str:
-	url = os.getenv("DATABASE_URL")
-	if not url:
-		raise RuntimeError("DATABASE_URL is not set")
-	return url
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
+    return url
 
 
 engine = create_engine(_get_database_url(), echo=False, future=True)
@@ -25,22 +25,20 @@ _tables_initialized = False
 
 
 def ensure_tables_initialized() -> None:
-	global _tables_initialized
-	if _tables_initialized:
-		return
-	try:
-		Base.metadata.create_all(engine)
-		_tables_initialized = True
-	except Exception:
-		# DB might not be ready yet; leave as not initialized and let caller retry on next request
-		_tables_initialized = False
+    global _tables_initialized
+    if _tables_initialized:
+        return
+    try:
+        Base.metadata.create_all(engine)
+        _tables_initialized = True
+    except Exception:
+        # DB might not be ready yet; leave as not initialized and let caller retry on next request
+        _tables_initialized = False
 
 
 def get_db_session() -> Generator:
-	db = SessionLocal()
-	try:
-		yield db
-	finally:
-		db.close()
-
-
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

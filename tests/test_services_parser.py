@@ -1,6 +1,7 @@
 """
 Tests for parser service.
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -66,14 +67,14 @@ class TestParser:
 
     def test_safe_decode_latin1(self):
         """Test safe decoding with latin-1 fallback."""
-        content = "Test content".encode('latin-1')
+        content = "Test content".encode("latin-1")
         result = _safe_decode(content)
         assert result == "Test content"
 
     def test_safe_decode_invalid(self):
         """Test safe decoding with invalid bytes."""
         # Create invalid UTF-8 sequence
-        content = b'\xff\xfe'
+        content = b"\xff\xfe"
         result = _safe_decode(content)
         # Should return empty string or handle gracefully
         assert isinstance(result, str)
@@ -110,7 +111,7 @@ class TestParser:
         assert title == "testfile"
         assert "Some content" in text
 
-    @patch('app.services.parser.pdfplumber')
+    @patch("app.services.parser.pdfplumber")
     def test_extract_text_pdf_page_error(self, mock_pdfplumber):
         """Test PDF extraction with page extraction error."""
         # Mock pdfplumber to raise error on page extraction
@@ -127,7 +128,7 @@ class TestParser:
         # Should continue despite page error
         assert isinstance(text, str)
 
-    @patch('app.services.parser.DocxDocument')
+    @patch("app.services.parser.DocxDocument")
     def test_extract_text_docx_paragraphs(self, mock_docx):
         """Test DOCX extraction with paragraphs."""
         mock_doc = MagicMock()
@@ -144,4 +145,3 @@ class TestParser:
         assert title == "test"
         assert "First paragraph" in text
         assert "Second paragraph" in text
-
