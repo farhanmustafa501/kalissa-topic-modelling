@@ -2,7 +2,7 @@
 Tests for Celery tasks.
 """
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -83,13 +83,13 @@ class TestCeleryTasks:
 		collection_id = sample_collection.id
 
 		# Make run_discovery raise an exception
-		mock_run_discovery.side_effect = Exception("Test error")
+		mock_run_discovery.side_effect = RuntimeError("Test error")
 
 		sample_discovery_job.status = JobStatusEnum.RUNNING
 		db_session.commit()
 
 		# Task should raise exception (Celery will mark it as failed)
-		with pytest.raises(Exception):
+		with pytest.raises(RuntimeError):
 			_call_task(job_id, collection_id)
 
 		# Re-query the job to get updated data (task closes session, so objects are detached)
@@ -127,7 +127,7 @@ class TestCeleryTasks:
 		mock_session_local.return_value = db_session
 
 		# Make run_discovery raise an exception
-		mock_run_discovery.side_effect = Exception("Original error")
+		mock_run_discovery.side_effect = RuntimeError("Original error")
 
 		sample_discovery_job.status = JobStatusEnum.RUNNING
 		db_session.commit()
@@ -139,12 +139,12 @@ class TestCeleryTasks:
 		def failing_commit():
 			call_count[0] += 1
 			if call_count[0] > 1:  # Fail on second commit (the failure persistence)
-				raise Exception("Commit failed")
+				raise RuntimeError("Commit failed")
 			original_commit()
 
 		db_session.commit = failing_commit
 
 		# Task should still raise the original exception
-		with pytest.raises(Exception):
+		with pytest.raises(RuntimeError):
 			_call_task(sample_discovery_job.id, sample_collection.id)
 
